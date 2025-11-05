@@ -1,0 +1,154 @@
+# =============================================================================
+# Production Dockerfile for LLM Observatory Collector Service
+# =============================================================================
+# Multi-stage build optimized for minimal image size and security
+# Receives OpenTelemetry data via OTLP (gRPC/HTTP) and processes LLM traces
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Stage 1: Build Dependencies (Cached Layer)
+# -----------------------------------------------------------------------------
+FROM rust:1.75-slim as dependencies
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    protobuf-compiler \
+    libprotobuf-dev \
+    musl-tools \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create app directory
+WORKDIR /app
+
+# Copy only dependency manifests for caching
+COPY Cargo.toml Cargo.lock ./
+COPY crates/core/Cargo.toml ./crates/core/
+COPY crates/collector/Cargo.toml ./crates/collector/
+COPY crates/storage/Cargo.toml ./crates/storage/
+COPY crates/api/Cargo.toml ./crates/api/
+COPY crates/sdk/Cargo.toml ./crates/sdk/
+COPY crates/providers/Cargo.toml ./crates/providers/
+COPY crates/cli/Cargo.toml ./crates/cli/
+
+# Create dummy source files to build dependencies
+RUN mkdir -p crates/core/src \
+    crates/collector/src \
+    crates/storage/src \
+    crates/api/src \
+    crates/sdk/src \
+    crates/providers/src \
+    crates/cli/src && \
+    echo "fn main() {}" > crates/collector/src/main.rs && \
+    echo "pub fn dummy() {}" > crates/core/src/lib.rs && \
+    echo "pub fn dummy() {}" > crates/storage/src/lib.rs && \
+    echo "pub fn dummy() {}" > crates/api/src/lib.rs && \
+    echo "pub fn dummy() {}" > crates/sdk/src/lib.rs && \
+    echo "pub fn dummy() {}" > crates/providers/src/lib.rs && \
+    echo "fn main() {}" > crates/cli/src/main.rs
+
+# Build dependencies only (this layer is cached)
+RUN cargo build --release --package llm-observatory-collector && \
+    rm -rf crates/*/src target/release/deps/llm_observatory*
+
+# -----------------------------------------------------------------------------
+# Stage 2: Build Application
+# -----------------------------------------------------------------------------
+FROM rust:1.75-slim as builder
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    protobuf-compiler \
+    libprotobuf-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy cached dependencies from previous stage
+COPY --from=dependencies /app/target /app/target
+COPY --from=dependencies /usr/local/cargo /usr/local/cargo
+
+# Copy workspace manifests
+COPY Cargo.toml Cargo.lock ./
+
+# Copy all source code
+COPY crates ./crates
+
+# Build the collector binary with optimizations
+RUN cargo build --release --package llm-observatory-collector && \
+    strip target/release/llm-observatory-collector
+
+# Verify the binary exists and works
+RUN target/release/llm-observatory-collector --version || \
+    (echo "Binary build failed!" && exit 1)
+
+# -----------------------------------------------------------------------------
+# Stage 3: Runtime Image
+# -----------------------------------------------------------------------------
+FROM debian:bookworm-slim
+
+# Install only runtime dependencies
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    libssl3 \
+    libprotobuf32 \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+# Create non-root user for security
+RUN groupadd -r collector --gid=1000 && \
+    useradd -r -g collector --uid=1000 --home-dir=/app --shell=/sbin/nologin collector
+
+# Create application directories
+RUN mkdir -p /app/config /app/logs /app/data && \
+    chown -R collector:collector /app
+
+WORKDIR /app
+
+# Copy binary from builder
+COPY --from=builder --chown=collector:collector \
+    /app/target/release/llm-observatory-collector /usr/local/bin/collector
+
+# Copy configuration files (if any)
+COPY --chown=collector:collector docker/config/collector.yaml /app/config/ 2>/dev/null || :
+
+# Switch to non-root user
+USER collector
+
+# Expose ports
+# 4317: OTLP gRPC receiver
+# 4318: OTLP HTTP receiver
+# 9091: Prometheus metrics endpoint
+# 8080: Health check endpoint
+EXPOSE 4317 4318 9091 8080
+
+# Environment variables (can be overridden)
+ENV RUST_LOG=info \
+    RUST_BACKTRACE=1 \
+    COLLECTOR_OTLP_GRPC_ENDPOINT=0.0.0.0:4317 \
+    COLLECTOR_OTLP_HTTP_ENDPOINT=0.0.0.0:4318 \
+    COLLECTOR_METRICS_ENDPOINT=0.0.0.0:9091 \
+    COLLECTOR_HEALTH_ENDPOINT=0.0.0.0:8080 \
+    COLLECTOR_LOG_LEVEL=info \
+    COLLECTOR_LOG_FORMAT=json
+
+# Health check configuration
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD ["/usr/local/bin/collector", "health-check"] || exit 1
+
+# Labels for metadata
+LABEL org.opencontainers.image.title="LLM Observatory Collector" \
+      org.opencontainers.image.description="OpenTelemetry collector with LLM-specific processing" \
+      org.opencontainers.image.vendor="LLM Observatory" \
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.source="https://github.com/llm-observatory/llm-observatory" \
+      org.opencontainers.image.documentation="https://docs.llm-observatory.io" \
+      com.llm-observatory.component="collector" \
+      com.llm-observatory.tier="backend"
+
+# Start the collector service
+ENTRYPOINT ["/usr/local/bin/collector"]
+CMD ["run", "--config", "/app/config/collector.yaml"]

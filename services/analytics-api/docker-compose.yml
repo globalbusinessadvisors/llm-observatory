@@ -1,0 +1,96 @@
+version: '3.8'
+
+services:
+  analytics-api:
+    build:
+      context: ../..
+      dockerfile: services/analytics-api/Dockerfile
+    container_name: llm-observatory-analytics-api
+    ports:
+      - "${API_PORT:-8080}:8080"
+      - "${API_METRICS_PORT:-9091}:9091"
+    environment:
+      # Database (read-only for analytics)
+      DATABASE_URL: ${DATABASE_READONLY_URL:-postgresql://llm_observatory_readonly:change_me_readonly@timescaledb:5432/llm_observatory}
+
+      # Redis
+      REDIS_URL: ${REDIS_URL:-redis://:redis_password@redis:6379/0}
+
+      # Cache settings
+      CACHE_DEFAULT_TTL: ${CACHE_DEFAULT_TTL:-3600}
+
+      # Server
+      APP_HOST: 0.0.0.0
+      API_PORT: 8080
+      API_METRICS_PORT: 9091
+
+      # CORS
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:8080}
+
+      # Logging
+      RUST_LOG: ${RUST_LOG:-info,analytics_api=debug,sqlx=warn}
+      RUST_BACKTRACE: 1
+
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+    networks:
+      - llm-observatory
+
+    restart: unless-stopped
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # TimescaleDB (if not already defined)
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: llm-observatory-timescaledb
+    environment:
+      POSTGRES_DB: ${DB_NAME:-llm_observatory}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - timescaledb-data:/var/lib/postgresql/data
+    networks:
+      - llm-observatory
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis (if not already defined)
+  redis:
+    image: redis:7-alpine
+    container_name: llm-observatory-redis
+    command: redis-server --requirepass ${REDIS_PASSWORD:-redis_password}
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - llm-observatory
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  timescaledb-data:
+  redis-data:
+
+networks:
+  llm-observatory:
+    name: llm-observatory
+    driver: bridge

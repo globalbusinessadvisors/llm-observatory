@@ -1,0 +1,100 @@
+# LLM Observatory CLI Tools Container
+# Purpose: Database management and utility operations
+# Includes: sqlx-cli, postgresql-client, and custom tools
+
+# Use Rust slim image as base for sqlx-cli
+FROM rust:1.75-slim-bookworm as builder
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install sqlx-cli with PostgreSQL support only
+RUN cargo install sqlx-cli \
+    --no-default-features \
+    --features postgres,native-tls \
+    --version 0.7.3
+
+# Final lightweight image
+FROM debian:bookworm-slim
+
+LABEL maintainer="LLM Observatory Contributors"
+LABEL description="CLI tools for database management and utilities"
+LABEL version="0.1.0"
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y \
+    # PostgreSQL client tools
+    postgresql-client \
+    # Compression utilities
+    gzip \
+    bzip2 \
+    xz-utils \
+    # Network utilities
+    curl \
+    wget \
+    # Shell utilities
+    bash \
+    jq \
+    # Text processing
+    sed \
+    grep \
+    awk \
+    # AWS CLI (optional, for S3 backups)
+    python3 \
+    python3-pip \
+    && pip3 install --no-cache-dir awscli --break-system-packages \
+    # Cleanup
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -rf /tmp/* \
+    && rm -rf /root/.cache
+
+# Copy sqlx-cli from builder
+COPY --from=builder /usr/local/cargo/bin/sqlx /usr/local/bin/sqlx
+
+# Create working directories
+RUN mkdir -p \
+    /app \
+    /app/migrations \
+    /app/scripts \
+    /app/backups \
+    /app/data \
+    && chmod -R 755 /app
+
+# Set working directory
+WORKDIR /app
+
+# Copy entrypoint script
+COPY docker/scripts/cli-entrypoint.sh /usr/local/bin/cli-entrypoint.sh
+RUN chmod +x /usr/local/bin/cli-entrypoint.sh
+
+# Copy utility scripts
+COPY docker/scripts/utilities/*.sh /app/scripts/
+RUN chmod +x /app/scripts/*.sh
+
+# Environment variables with defaults
+ENV DB_HOST=timescaledb \
+    DB_PORT=5432 \
+    DB_NAME=llm_observatory \
+    DB_USER=postgres \
+    DB_PASSWORD=postgres \
+    DATABASE_URL=postgresql://postgres:postgres@timescaledb:5432/llm_observatory \
+    MIGRATIONS_DIR=/app/migrations \
+    SCRIPTS_DIR=/app/scripts \
+    BACKUPS_DIR=/app/backups \
+    DATA_DIR=/app/data \
+    LOG_LEVEL=info \
+    RUST_LOG=sqlx=info
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD pg_isready -h ${DB_HOST} -p ${DB_PORT} -U ${DB_USER} -d ${DB_NAME} || exit 1
+
+# Default entrypoint
+ENTRYPOINT ["/usr/local/bin/cli-entrypoint.sh"]
+
+# Default command shows help
+CMD ["help"]

@@ -1,0 +1,170 @@
+# Custom PostgreSQL queries for postgres_exporter
+# Extended metrics for LLM Observatory
+
+pg_stat_statements:
+  query: |
+    SELECT
+      queryid,
+      query,
+      calls,
+      total_time,
+      min_time,
+      max_time,
+      mean_time,
+      stddev_time,
+      rows
+    FROM pg_stat_statements
+    WHERE dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
+    ORDER BY total_time DESC
+    LIMIT 100
+  metrics:
+    - queryid:
+        usage: "LABEL"
+        description: "Query ID"
+    - query:
+        usage: "LABEL"
+        description: "Query text (truncated)"
+    - calls:
+        usage: "COUNTER"
+        description: "Number of times executed"
+    - total_time:
+        usage: "COUNTER"
+        description: "Total time spent in the statement, in milliseconds"
+    - min_time:
+        usage: "GAUGE"
+        description: "Minimum time spent in the statement, in milliseconds"
+    - max_time:
+        usage: "GAUGE"
+        description: "Maximum time spent in the statement, in milliseconds"
+    - mean_time:
+        usage: "GAUGE"
+        description: "Mean time spent in the statement, in milliseconds"
+    - stddev_time:
+        usage: "GAUGE"
+        description: "Population standard deviation of time spent in the statement, in milliseconds"
+    - rows:
+        usage: "COUNTER"
+        description: "Total number of rows retrieved or affected by the statement"
+
+pg_table_bloat:
+  query: |
+    SELECT
+      schemaname,
+      tablename,
+      ROUND((CASE WHEN otta=0 THEN 0.0 ELSE sml.relpages::float/otta END)::numeric,1) AS tbloat,
+      CASE WHEN relpages < otta THEN 0 ELSE bs*(sml.relpages-otta)::BIGINT END AS wastedbytes,
+      iname,
+      ROUND((CASE WHEN iotta=0 OR ipages=0 THEN 0.0 ELSE ipages::float/iotta END)::numeric,1) AS ibloat,
+      CASE WHEN ipages < iotta THEN 0 ELSE bs*(ipages-iotta) END AS wastedibytes
+    FROM (
+      SELECT
+        schemaname, tablename, cc.reltuples, cc.relpages, bs,
+        CEIL((cc.reltuples*((datahdr+ma-(CASE WHEN datahdr%ma=0 THEN ma ELSE datahdr%ma END))+nullhdr2+4))/(bs-20::float)) AS otta,
+        COALESCE(c2.relname,'?') AS iname, COALESCE(c2.reltuples,0) AS ituples, COALESCE(c2.relpages,0) AS ipages,
+        COALESCE(CEIL((c2.reltuples*(datahdr-12))/(bs-20::float)),0) AS iotta
+      FROM (
+        SELECT
+          ma,bs,schemaname,tablename,
+          (datawidth+(hdr+ma-(case when hdr%ma=0 THEN ma ELSE hdr%ma END)))::numeric AS datahdr,
+          (maxfracsum*(nullhdr+ma-(case when nullhdr%ma=0 THEN ma ELSE nullhdr%ma END))) AS nullhdr2
+        FROM (
+          SELECT
+            schemaname, tablename, hdr, ma, bs,
+            SUM((1-null_frac)*avg_width) AS datawidth,
+            MAX(null_frac) AS maxfracsum,
+            hdr+(
+              SELECT 1+count(*)/8
+              FROM pg_stats s2
+              WHERE null_frac<>0 AND s2.schemaname = s.schemaname AND s2.tablename = s.tablename
+            ) AS nullhdr
+          FROM pg_stats s, (
+            SELECT
+              (SELECT current_setting('block_size')::numeric) AS bs,
+              CASE WHEN substring(v,12,3) IN ('8.0','8.1','8.2') THEN 27 ELSE 23 END AS hdr,
+              CASE WHEN v ~ 'mingw32' THEN 8 ELSE 4 END AS ma
+            FROM (SELECT version() AS v) AS foo
+          ) AS constants
+          GROUP BY 1,2,3,4,5
+        ) AS foo
+      ) AS rs
+      JOIN pg_class cc ON cc.relname = rs.tablename
+      JOIN pg_namespace nn ON cc.relnamespace = nn.oid AND nn.nspname = rs.schemaname AND nn.nspname <> 'information_schema'
+      LEFT JOIN pg_index i ON indrelid = cc.oid
+      LEFT JOIN pg_class c2 ON c2.oid = i.indexrelid
+    ) AS sml
+    WHERE sml.relpages - otta > 128
+    ORDER BY wastedbytes DESC
+  metrics:
+    - schemaname:
+        usage: "LABEL"
+        description: "Schema name"
+    - tablename:
+        usage: "LABEL"
+        description: "Table name"
+    - tbloat:
+        usage: "GAUGE"
+        description: "Table bloat ratio"
+    - wastedbytes:
+        usage: "GAUGE"
+        description: "Wasted bytes in table"
+    - iname:
+        usage: "LABEL"
+        description: "Index name"
+    - ibloat:
+        usage: "GAUGE"
+        description: "Index bloat ratio"
+    - wastedibytes:
+        usage: "GAUGE"
+        description: "Wasted bytes in index"
+
+pg_database_size:
+  query: |
+    SELECT
+      datname,
+      pg_database_size(datname) as size_bytes
+    FROM pg_database
+    WHERE datname NOT IN ('template0', 'template1')
+  metrics:
+    - datname:
+        usage: "LABEL"
+        description: "Database name"
+    - size_bytes:
+        usage: "GAUGE"
+        description: "Database size in bytes"
+
+pg_locks:
+  query: |
+    SELECT
+      pg_database.datname,
+      tmp.mode,
+      COALESCE(count,0) as count
+    FROM
+    (
+      VALUES ('accesssharelock'),
+             ('rowsharelock'),
+             ('rowexclusivelock'),
+             ('shareupdateexclusivelock'),
+             ('sharelock'),
+             ('sharerowexclusivelock'),
+             ('exclusivelock'),
+             ('accessexclusivelock')
+    ) AS tmp(mode) CROSS JOIN pg_database
+    LEFT JOIN
+    (
+      SELECT database, lower(mode) AS mode,count(*) AS count
+      FROM pg_locks WHERE database IS NOT NULL
+      GROUP BY database, lower(mode)
+    ) AS tmp2
+    ON tmp.mode=tmp2.mode and pg_database.oid = tmp2.database
+    WHERE pg_database.datname NOT IN ('template0', 'template1')
+    ORDER BY 1
+  metrics:
+    - datname:
+        usage: "LABEL"
+        description: "Database name"
+    - mode:
+        usage: "LABEL"
+        description: "Lock mode"
+    - count:
+        usage: "GAUGE"
+        description: "Number of locks"

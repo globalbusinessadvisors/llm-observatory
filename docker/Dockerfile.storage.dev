@@ -1,0 +1,115 @@
+# ============================================================================
+# Development Dockerfile for LLM Observatory Storage Service
+# ============================================================================
+# Optimized for:
+# - Fast rebuild times
+# - Hot reload with cargo-watch
+# - Database migrations
+# - Development debugging
+# ============================================================================
+
+FROM rust:1.75-bookworm AS development
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    # Build dependencies
+    libssl-dev \
+    pkg-config \
+    libpq-dev \
+    # Development tools
+    curl \
+    wget \
+    vim \
+    git \
+    # Database client for debugging
+    postgresql-client \
+    redis-tools \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install cargo development tools
+RUN cargo install cargo-watch --version 8.5.2 && \
+    cargo install sqlx-cli --version 0.8.0 --no-default-features --features postgres,rustls && \
+    cargo install cargo-nextest --version 0.9.72
+
+# Create application user (but run as current user for development)
+RUN groupadd -r storage && useradd -r -g storage -u 1000 storage || true
+
+# Create application directories
+RUN mkdir -p /app/migrations /app/target && \
+    chmod -R 777 /app
+
+WORKDIR /app
+
+# Environment variables for development
+ENV RUST_LOG=debug \
+    RUST_BACKTRACE=full \
+    # Fast compilation settings
+    CARGO_INCREMENTAL=1 \
+    CARGO_TARGET_DIR=/app/target \
+    # Database configuration
+    DB_POOL_MIN_SIZE=2 \
+    DB_POOL_MAX_SIZE=10 \
+    DB_POOL_TIMEOUT=30 \
+    # COPY protocol settings (smaller batches for dev)
+    COPY_BATCH_SIZE=1000 \
+    COPY_FLUSH_INTERVAL=500 \
+    COPY_BUFFER_SIZE=4096 \
+    # Server configuration
+    APP_HOST=0.0.0.0 \
+    APP_PORT=8080 \
+    METRICS_PORT=9090 \
+    HEALTH_CHECK_ENABLED=true \
+    METRICS_ENABLED=true \
+    # Development features
+    AUTO_RELOAD=true \
+    DEBUG=true \
+    DB_QUERY_LOGGING=true
+
+# Expose ports
+# 8080 - Internal API port for health/admin endpoints
+# 9090 - Prometheus metrics endpoint
+EXPOSE 8080 9090
+
+# Copy entrypoint script for development
+COPY docker/entrypoint-storage-dev.sh /usr/local/bin/entrypoint-dev.sh
+RUN chmod +x /usr/local/bin/entrypoint-dev.sh
+
+# Use cargo-watch for hot reload by default
+ENTRYPOINT ["/usr/local/bin/entrypoint-dev.sh"]
+
+# Default command: run with cargo-watch for hot reload
+CMD ["cargo", "watch", "-x", "run --bin storage-service"]
+
+# ============================================================================
+# Development usage:
+#
+# Build:
+#   docker-compose -f docker-compose.yml build storage-dev
+#
+# Run with hot reload:
+#   docker-compose up storage-dev
+#
+# Run tests with hot reload:
+#   docker-compose run storage-dev cargo watch -x test
+#
+# Run benchmarks:
+#   docker-compose run storage-dev cargo bench
+#
+# Access shell:
+#   docker-compose run storage-dev bash
+#
+# Run migrations manually:
+#   docker-compose run storage-dev sqlx migrate run
+#
+# Database console:
+#   docker-compose run storage-dev psql $DATABASE_URL
+# ============================================================================
+
+# ============================================================================
+# Volume mounts for development (configured in docker-compose.yml):
+# - ./crates:/app/crates - Source code with hot reload
+# - ./Cargo.toml:/app/Cargo.toml - Workspace configuration
+# - ./Cargo.lock:/app/Cargo.lock - Dependency lock file
+# - storage-target:/app/target - Cargo build cache (persistent)
+# - storage-cargo-registry:/usr/local/cargo/registry - Cargo registry cache
+# ============================================================================

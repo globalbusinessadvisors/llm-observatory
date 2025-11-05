@@ -1,0 +1,286 @@
+version: '3.8'
+
+services:
+  # Test TimescaleDB - In-memory with tmpfs for faster tests
+  timescaledb-test:
+    image: timescale/timescaledb:2.14.2-pg16
+    container_name: llm-observatory-test-db
+    restart: "no"
+    ports:
+      - "${TEST_DB_PORT:-5433}:5432"
+    environment:
+      POSTGRES_USER: ${TEST_DB_USER:-test_user}
+      POSTGRES_PASSWORD: ${TEST_DB_PASSWORD:-test_password}
+      POSTGRES_DB: ${TEST_DB_NAME:-llm_observatory_test}
+      TIMESCALEDB_TELEMETRY: "off"
+      # Optimized for testing - speed over durability
+      POSTGRES_SHARED_BUFFERS: 128MB
+      POSTGRES_WORK_MEM: 16MB
+      POSTGRES_MAINTENANCE_WORK_MEM: 64MB
+      POSTGRES_EFFECTIVE_CACHE_SIZE: 512MB
+      # Disable fsync for faster writes in tests
+      POSTGRES_FSYNC: "off"
+      POSTGRES_SYNCHRONOUS_COMMIT: "off"
+      POSTGRES_FULL_PAGE_WRITES: "off"
+    volumes:
+      # Initialization scripts
+      - ./docker/init:/docker-entrypoint-initdb.d:ro
+      - ./docker/test/init:/docker-entrypoint-initdb.d/test:ro
+    tmpfs:
+      # Use tmpfs for data - in-memory for speed
+      - /var/lib/postgresql/data:rw,noexec,nosuid,size=512m
+      # Temporary files in memory
+      - /tmp:rw,noexec,nosuid,size=256m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${TEST_DB_USER:-test_user} -d ${TEST_DB_NAME:-llm_observatory_test}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    networks:
+      - test-network
+    command: >
+      postgres
+      -c shared_preload_libraries=timescaledb
+      -c max_connections=100
+      -c fsync=off
+      -c synchronous_commit=off
+      -c full_page_writes=off
+      -c wal_level=minimal
+      -c max_wal_senders=0
+      -c log_statement=none
+      -c log_duration=off
+      -c log_min_duration_statement=-1
+      -c checkpoint_timeout=30min
+      -c max_wal_size=2GB
+      -c checkpoint_completion_target=0.9
+      -c random_page_cost=1.0
+
+  # Test Redis - In-memory, no persistence
+  redis-test:
+    image: redis:7.2-alpine
+    container_name: llm-observatory-test-redis
+    restart: "no"
+    ports:
+      - "${TEST_REDIS_PORT:-6380}:6379"
+    environment:
+      REDIS_PASSWORD: ${TEST_REDIS_PASSWORD:-test_redis}
+    tmpfs:
+      - /data:rw,noexec,nosuid,size=128m
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 10
+      start_period: 5s
+    networks:
+      - test-network
+    command: >
+      redis-server
+      --requirepass ${TEST_REDIS_PASSWORD:-test_redis}
+      --maxmemory 128mb
+      --maxmemory-policy allkeys-lru
+      --save ""
+      --appendonly no
+      --protected-mode no
+
+  # Test runner service - runs all tests with coverage
+  test-runner:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.test
+      target: test-runner
+      cache_from:
+        - llm-observatory-test:cache
+      args:
+        RUST_VERSION: 1.75.0
+        CARGO_BUILD_JOBS: ${CARGO_BUILD_JOBS:-4}
+    container_name: llm-observatory-test-runner
+    restart: "no"
+    environment:
+      # Test database configuration
+      DATABASE_URL: postgres://${TEST_DB_USER:-test_user}:${TEST_DB_PASSWORD:-test_password}@timescaledb-test:5432/${TEST_DB_NAME:-llm_observatory_test}
+      TEST_DATABASE_URL: postgres://${TEST_DB_USER:-test_user}:${TEST_DB_PASSWORD:-test_password}@timescaledb-test:5432/${TEST_DB_NAME:-llm_observatory_test}
+
+      # Redis configuration
+      REDIS_URL: redis://:${TEST_REDIS_PASSWORD:-test_redis}@redis-test:6379
+      TEST_REDIS_URL: redis://:${TEST_REDIS_PASSWORD:-test_redis}@redis-test:6379
+
+      # Test configuration
+      RUST_BACKTRACE: ${RUST_BACKTRACE:-1}
+      RUST_LOG: ${RUST_LOG:-info,sqlx=warn}
+      TEST_THREADS: ${TEST_THREADS:-4}
+      NEXTEST_PROFILE: ${NEXTEST_PROFILE:-ci}
+      CARGO_TERM_COLOR: always
+
+      # Coverage configuration
+      COVERAGE_OUTPUT_DIR: /workspace/coverage
+      COVERAGE_FORMAT: ${COVERAGE_FORMAT:-html,lcov}
+      TARPAULIN_TIMEOUT: ${TARPAULIN_TIMEOUT:-600}
+
+      # CI/CD flags
+      CI: ${CI:-false}
+      GITHUB_ACTIONS: ${GITHUB_ACTIONS:-false}
+      GITLAB_CI: ${GITLAB_CI:-false}
+    volumes:
+      # Source code
+      - .:/workspace:ro
+      # Test results output
+      - test-results:/workspace/test-results:rw
+      # Coverage output
+      - coverage-results:/workspace/coverage:rw
+      # Cargo cache for faster builds
+      - cargo-cache:/usr/local/cargo/registry:rw
+      - cargo-git-cache:/usr/local/cargo/git:rw
+      - target-cache:/workspace/target:rw
+    networks:
+      - test-network
+    depends_on:
+      timescaledb-test:
+        condition: service_healthy
+      redis-test:
+        condition: service_healthy
+    working_dir: /workspace
+    profiles:
+      - test
+    # Override in CI or manually
+    command: ["./docker/test/run-all-tests.sh"]
+
+  # Unit test runner - fast unit tests only
+  unit-test-runner:
+    extends: test-runner
+    container_name: llm-observatory-unit-test-runner
+    environment:
+      TEST_TYPE: unit
+    command: ["cargo", "nextest", "run", "--profile", "ci", "--workspace", "--lib"]
+    profiles:
+      - unit-test
+    depends_on: []
+
+  # Integration test runner - integration tests with dependencies
+  integration-test-runner:
+    extends: test-runner
+    container_name: llm-observatory-integration-test-runner
+    environment:
+      TEST_TYPE: integration
+    command: ["cargo", "nextest", "run", "--profile", "ci", "--workspace", "--test", "*"]
+    profiles:
+      - integration-test
+
+  # Coverage runner - generates coverage reports
+  coverage-runner:
+    extends: test-runner
+    container_name: llm-observatory-coverage-runner
+    environment:
+      TEST_TYPE: coverage
+      TARPAULIN_FLAGS: ${TARPAULIN_FLAGS:---engine llvm --out Html --out Lcov --output-dir coverage}
+    command: ["./docker/test/run-coverage.sh"]
+    profiles:
+      - coverage
+
+  # Parallel test runner - runs tests in parallel shards
+  parallel-test-runner:
+    extends: test-runner
+    container_name: llm-observatory-parallel-test-runner-${SHARD_INDEX:-0}
+    environment:
+      TEST_TYPE: parallel
+      SHARD_INDEX: ${SHARD_INDEX:-0}
+      SHARD_TOTAL: ${SHARD_TOTAL:-4}
+    command:
+      - sh
+      - -c
+      - |
+        cargo nextest run \
+          --profile ci \
+          --workspace \
+          --partition hash:${SHARD_INDEX:-0}/${SHARD_TOTAL:-4}
+    profiles:
+      - parallel-test
+
+  # Benchmark runner - for performance benchmarks
+  benchmark-runner:
+    extends: test-runner
+    container_name: llm-observatory-benchmark-runner
+    environment:
+      TEST_TYPE: benchmark
+    volumes:
+      - .:/workspace:ro
+      - benchmark-results:/workspace/target/criterion:rw
+      - cargo-cache:/usr/local/cargo/registry:rw
+      - target-cache:/workspace/target:rw
+    command: ["cargo", "bench", "--workspace"]
+    profiles:
+      - benchmark
+    depends_on:
+      timescaledb-test:
+        condition: service_healthy
+      redis-test:
+        condition: service_healthy
+
+  # Test database seeder - populates test data
+  test-seeder:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.test
+      target: test-tools
+    container_name: llm-observatory-test-seeder
+    restart: "no"
+    environment:
+      DATABASE_URL: postgres://${TEST_DB_USER:-test_user}:${TEST_DB_PASSWORD:-test_password}@timescaledb-test:5432/${TEST_DB_NAME:-llm_observatory_test}
+      REDIS_URL: redis://:${TEST_REDIS_PASSWORD:-test_redis}@redis-test:6379
+      SEED_DATA_SIZE: ${SEED_DATA_SIZE:-small}
+    volumes:
+      - ./docker/test/fixtures:/fixtures:ro
+      - ./docker/test/seeds:/seeds:ro
+    networks:
+      - test-network
+    depends_on:
+      timescaledb-test:
+        condition: service_healthy
+      redis-test:
+        condition: service_healthy
+    working_dir: /workspace
+    command: ["./docker/test/seed-test-data.sh"]
+    profiles:
+      - seed
+
+  # Test results reporter - aggregates and reports test results
+  test-reporter:
+    image: alpine:3.19
+    container_name: llm-observatory-test-reporter
+    restart: "no"
+    volumes:
+      - test-results:/test-results:ro
+      - coverage-results:/coverage:ro
+      - ./docker/test:/scripts:ro
+    command: ["sh", "/scripts/generate-test-report.sh"]
+    profiles:
+      - report
+
+networks:
+  test-network:
+    driver: bridge
+    name: llm-observatory-test-network
+
+volumes:
+  # Shared test results
+  test-results:
+    name: llm-observatory-test-results
+
+  # Coverage results
+  coverage-results:
+    name: llm-observatory-coverage-results
+
+  # Benchmark results
+  benchmark-results:
+    name: llm-observatory-benchmark-results
+
+  # Build caches for faster test runs
+  cargo-cache:
+    name: llm-observatory-test-cargo-cache
+
+  cargo-git-cache:
+    name: llm-observatory-test-cargo-git-cache
+
+  target-cache:
+    name: llm-observatory-test-target-cache

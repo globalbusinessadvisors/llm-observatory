@@ -1,0 +1,246 @@
+# ============================================================================
+# AI Customer Support Platform - Git Ignore
+# ============================================================================
+
+# ============================================================================
+# Environment & Secrets
+# ============================================================================
+.env
+.env.local
+.env.*.local
+.env.production
+*.pem
+*.key
+secrets/
+.secrets
+
+# ============================================================================
+# Dependencies
+# ============================================================================
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+.venv/
+venv/
+ENV/
+env/
+poetry.lock
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+.pnpm-store/
+package-lock.json
+yarn.lock
+
+# Rust
+target/
+Cargo.lock
+**/*.rs.bk
+*.pdb
+
+# ============================================================================
+# IDEs & Editors
+# ============================================================================
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.code-workspace
+
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.sublime-project
+*.sublime-workspace
+
+.project
+.classpath
+.c9/
+*.launch
+.settings/
+.factorypath
+
+# ============================================================================
+# Logs & Databases
+# ============================================================================
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# ============================================================================
+# Testing
+# ============================================================================
+coverage/
+.coverage
+.coverage.*
+*.cover
+.hypothesis/
+.pytest_cache/
+htmlcov/
+.tox/
+.nox/
+*.lcov
+.nyc_output
+
+# ============================================================================
+# Build Outputs
+# ============================================================================
+dist/
+dist-ssr/
+build/
+out/
+*.local
+
+# Frontend
+.cache/
+.parcel-cache/
+.next/
+.nuxt/
+.vuepress/dist
+.serverless/
+
+# Rust
+target/
+
+# Python
+*.whl
+
+# ============================================================================
+# Docker
+# ============================================================================
+.docker/
+*.dockerfile
+
+# ============================================================================
+# OS Files
+# ============================================================================
+.DS_Store
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+*.lnk
+
+# ============================================================================
+# Temporary Files
+# ============================================================================
+tmp/
+temp/
+*.tmp
+*.bak
+*.swp
+*~.nib
+.*.sw?
+
+# ============================================================================
+# Data & Uploads
+# ============================================================================
+data/
+uploads/
+downloads/
+*.csv
+*.json.gz
+*.parquet
+
+# Exclude test fixtures
+!**/fixtures/**/*.csv
+!**/fixtures/**/*.json
+
+# ============================================================================
+# Documentation Build
+# ============================================================================
+docs/_build/
+docs/.doctrees/
+site/
+
+# ============================================================================
+# Service Specific
+# ============================================================================
+# Chat API (Python)
+services/chat-api/.venv/
+services/chat-api/instance/
+services/chat-api/.pytest_cache/
+services/chat-api/htmlcov/
+
+# KB API (Node.js)
+services/kb-api/node_modules/
+services/kb-api/dist/
+services/kb-api/.turbo/
+
+# Analytics API (Rust)
+services/analytics-api/target/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.turbo/
+
+# SDKs
+sdk/python/.venv/
+sdk/python/dist/
+sdk/nodejs/node_modules/
+sdk/nodejs/dist/
+sdk/rust/target/
+
+# ============================================================================
+# Monitoring & Profiling
+# ============================================================================
+.prof
+*.cpuprofile
+*.heapprofile
+*.heapsnapshot
+.trace
+
+# ============================================================================
+# CI/CD
+# ============================================================================
+.github/workflows/*.log
+
+# ============================================================================
+# Misc
+# ============================================================================
+.npmrc
+.yarnrc
+.pnp.*
+.yarn/install-state.gz
+.direnv/

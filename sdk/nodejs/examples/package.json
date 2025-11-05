@@ -1,0 +1,24 @@
+{
+  "name": "llm-observatory-examples",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Examples for LLM Observatory Node.js SDK",
+  "scripts": {
+    "basic": "ts-node basic-usage.ts",
+    "streaming": "ts-node streaming.ts",
+    "express": "ts-node express-middleware.ts",
+    "cost": "ts-node cost-tracking.ts",
+    "advanced": "ts-node advanced-tracing.ts"
+  },
+  "dependencies": {
+    "@llm-observatory/sdk": "file:..",
+    "express": "^4.18.2",
+    "openai": "^4.56.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.14.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.5"
+  }
+}

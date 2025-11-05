@@ -1,0 +1,269 @@
+[
+  {
+    "trace_id": "trace_001",
+    "project_id": "00000000-0000-0000-0000-000000000101",
+    "model": "gpt-4",
+    "provider": "openai",
+    "user_id": "user_123",
+    "session_id": "session_abc",
+    "metadata": {
+      "environment": "test",
+      "version": "1.0.0",
+      "source": "api"
+    },
+    "spans": [
+      {
+        "span_id": "span_001_001",
+        "parent_span_id": null,
+        "name": "chat_completion",
+        "kind": "llm",
+        "duration_ms": 1234,
+        "status": "success",
+        "attributes": {
+          "temperature": 0.7,
+          "max_tokens": 500,
+          "top_p": 1.0
+        },
+        "events": [
+          {
+            "event_type": "request",
+            "name": "llm.request",
+            "data": {
+              "messages": [
+                {
+                  "role": "user",
+                  "content": "What is the capital of France?"
+                }
+              ]
+            }
+          },
+          {
+            "event_type": "response",
+            "name": "llm.response",
+            "data": {
+              "message": {
+                "role": "assistant",
+                "content": "The capital of France is Paris."
+              }
+            }
+          }
+        ],
+        "token_usage": {
+          "prompt_tokens": 15,
+          "completion_tokens": 8,
+          "total_tokens": 23
+        },
+        "cost": {
+          "cost_usd": 0.000525,
+          "breakdown": {
+            "prompt": 0.00045,
+            "completion": 0.000075
+          }
+        }
+      }
+    ]
+  },
+  {
+    "trace_id": "trace_002",
+    "project_id": "00000000-0000-0000-0000-000000000101",
+    "model": "claude-3-sonnet",
+    "provider": "anthropic",
+    "user_id": "user_456",
+    "session_id": "session_def",
+    "metadata": {
+      "environment": "test",
+      "version": "1.0.0",
+      "source": "sdk"
+    },
+    "spans": [
+      {
+        "span_id": "span_002_001",
+        "parent_span_id": null,
+        "name": "message_create",
+        "kind": "llm",
+        "duration_ms": 2567,
+        "status": "success",
+        "attributes": {
+          "temperature": 0.5,
+          "max_tokens": 1000
+        },
+        "events": [
+          {
+            "event_type": "request",
+            "name": "llm.request",
+            "data": {
+              "messages": [
+                {
+                  "role": "user",
+                  "content": "Explain quantum computing in simple terms."
+                }
+              ]
+            }
+          },
+          {
+            "event_type": "response",
+            "name": "llm.response",
+            "data": {
+              "message": {
+                "role": "assistant",
+                "content": "Quantum computing is a type of computing that uses quantum mechanics..."
+              }
+            }
+          }
+        ],
+        "token_usage": {
+          "prompt_tokens": 20,
+          "completion_tokens": 150,
+          "total_tokens": 170
+        },
+        "cost": {
+          "cost_usd": 0.00285,
+          "breakdown": {
+            "prompt": 0.00006,
+            "completion": 0.00225
+          }
+        }
+      }
+    ]
+  },
+  {
+    "trace_id": "trace_003_error",
+    "project_id": "00000000-0000-0000-0000-000000000102",
+    "model": "gpt-3.5-turbo",
+    "provider": "openai",
+    "user_id": "user_789",
+    "session_id": "session_ghi",
+    "metadata": {
+      "environment": "test",
+      "version": "1.0.0",
+      "source": "api"
+    },
+    "spans": [
+      {
+        "span_id": "span_003_001",
+        "parent_span_id": null,
+        "name": "chat_completion",
+        "kind": "llm",
+        "duration_ms": 567,
+        "status": "error",
+        "attributes": {
+          "temperature": 0.9,
+          "max_tokens": 2000
+        },
+        "events": [
+          {
+            "event_type": "request",
+            "name": "llm.request",
+            "data": {
+              "messages": [
+                {
+                  "role": "user",
+                  "content": "Test error scenario"
+                }
+              ]
+            }
+          },
+          {
+            "event_type": "error",
+            "name": "llm.error",
+            "severity": "error",
+            "data": {
+              "error": {
+                "type": "RateLimitError",
+                "message": "Rate limit exceeded",
+                "code": "rate_limit_exceeded"
+              }
+            }
+          }
+        ],
+        "token_usage": {
+          "prompt_tokens": 10,
+          "completion_tokens": 0,
+          "total_tokens": 10
+        },
+        "cost": {
+          "cost_usd": 0.000005,
+          "breakdown": {
+            "prompt": 0.000005,
+            "completion": 0.0
+          }
+        }
+      }
+    ]
+  },
+  {
+    "trace_id": "trace_004_streaming",
+    "project_id": "00000000-0000-0000-0000-000000000101",
+    "model": "gpt-4-turbo",
+    "provider": "openai",
+    "user_id": "user_123",
+    "session_id": "session_jkl",
+    "metadata": {
+      "environment": "test",
+      "version": "1.0.0",
+      "source": "api",
+      "streaming": true
+    },
+    "spans": [
+      {
+        "span_id": "span_004_001",
+        "parent_span_id": null,
+        "name": "chat_completion_stream",
+        "kind": "llm",
+        "duration_ms": 3456,
+        "status": "success",
+        "attributes": {
+          "temperature": 0.8,
+          "max_tokens": 1500,
+          "stream": true
+        },
+        "events": [
+          {
+            "event_type": "request",
+            "name": "llm.request",
+            "data": {
+              "messages": [
+                {
+                  "role": "user",
+                  "content": "Write a detailed explanation of machine learning."
+                }
+              ],
+              "stream": true
+            }
+          },
+          {
+            "event_type": "metric",
+            "name": "llm.streaming.chunk",
+            "data": {
+              "chunk_count": 15,
+              "time_to_first_token_ms": 234,
+              "avg_token_latency_ms": 23.5
+            }
+          },
+          {
+            "event_type": "response",
+            "name": "llm.response",
+            "data": {
+              "message": {
+                "role": "assistant",
+                "content": "Machine learning is a subset of artificial intelligence..."
+              }
+            }
+          }
+        ],
+        "token_usage": {
+          "prompt_tokens": 25,
+          "completion_tokens": 350,
+          "total_tokens": 375
+        },
+        "cost": {
+          "cost_usd": 0.01075,
+          "breakdown": {
+            "prompt": 0.00025,
+            "completion": 0.0105
+          }
+        }
+      }
+    ]
+  }
+]

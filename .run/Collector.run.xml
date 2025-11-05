@@ -1,0 +1,27 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Collector" type="CargoCommandRunConfiguration" factoryName="Cargo Command">
+    <option name="command" value="run --package llm-observatory-collector --bin llm-observatory-collector" />
+    <option name="workingDirectory" value="file://$PROJECT_DIR$" />
+    <option name="channel" value="DEFAULT" />
+    <option name="requiredFeatures" value="true" />
+    <option name="allFeatures" value="false" />
+    <option name="emulateTerminal" value="false" />
+    <option name="withSudo" value="false" />
+    <option name="buildTarget" value="REMOTE" />
+    <option name="backtrace" value="SHORT" />
+    <envs>
+      <env name="RUST_LOG" value="debug" />
+      <env name="RUST_BACKTRACE" value="1" />
+      <env name="DATABASE_URL" value="postgresql://postgres:postgres@localhost:5432/llm_observatory" />
+      <env name="REDIS_URL" value="redis://:redis_password@localhost:6379/0" />
+      <env name="APP_HOST" value="0.0.0.0" />
+      <env name="APP_PORT" value="8081" />
+      <env name="ENVIRONMENT" value="development" />
+    </envs>
+    <option name="isRedirectInput" value="false" />
+    <option name="redirectInputPath" value="" />
+    <method v="2">
+      <option name="CARGO.BUILD_TASK_PROVIDER" enabled="true" />
+    </method>
+  </configuration>
+</component>

@@ -1,0 +1,244 @@
+# =============================================================================
+# LLM Observatory Application Services
+# =============================================================================
+# This file extends docker-compose.yml with application-specific services
+# Usage: docker compose -f docker-compose.yml -f docker-compose.app.yml up
+# =============================================================================
+
+version: '3.8'
+
+services:
+  # Storage Service - Persistence layer for traces, metrics, and logs
+  storage:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.storage
+    image: llm-observatory/storage:latest
+    container_name: llm-observatory-storage
+    restart: unless-stopped
+    ports:
+      - "${STORAGE_METRICS_PORT:-9092}:9092"
+      - "${STORAGE_HEALTH_PORT:-8081}:8081"
+    environment:
+      # Database connection
+      DATABASE_URL: postgresql://${DB_APP_USER:-llm_observatory_app}:${DB_APP_PASSWORD:-change_me_in_production}@timescaledb:5432/${DB_NAME:-llm_observatory}
+      DB_POOL_MIN_SIZE: ${DB_POOL_MIN_SIZE:-5}
+      DB_POOL_MAX_SIZE: ${DB_POOL_MAX_SIZE:-20}
+      DB_POOL_TIMEOUT: ${DB_POOL_TIMEOUT:-30}
+
+      # Redis connection
+      REDIS_URL: redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/${REDIS_DB:-0}
+
+      # Cache configuration
+      CACHE_DEFAULT_TTL: ${CACHE_DEFAULT_TTL:-3600}
+      CACHE_SHORT_TTL: ${CACHE_SHORT_TTL:-300}
+      CACHE_LONG_TTL: ${CACHE_LONG_TTL:-86400}
+
+      # Storage configuration
+      STORAGE_BATCH_SIZE: ${STORAGE_BATCH_SIZE:-1000}
+      STORAGE_FLUSH_INTERVAL: ${STORAGE_FLUSH_INTERVAL:-5}
+      STORAGE_COMPRESSION_ENABLED: ${STORAGE_COMPRESSION_ENABLED:-true}
+
+      # Logging
+      RUST_LOG: ${STORAGE_LOG_LEVEL:-info}
+      RUST_BACKTRACE: ${RUST_BACKTRACE:-1}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+
+      # Metrics
+      METRICS_ENABLED: ${METRICS_ENABLED:-true}
+      METRICS_PORT: 9092
+
+      # Health check
+      HEALTH_CHECK_ENABLED: ${HEALTH_CHECK_ENABLED:-true}
+      HEALTH_PORT: 8081
+    volumes:
+      - storage_data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - llm-observatory-network
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # Collector Service - OpenTelemetry OTLP receiver with LLM processing
+  # Note: Uses different ports from Jaeger (4327/4328 instead of 4317/4318)
+  collector:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.collector
+    image: llm-observatory/collector:latest
+    container_name: llm-observatory-collector
+    restart: unless-stopped
+    ports:
+      # OTLP receivers (using different ports from Jaeger)
+      - "${COLLECTOR_OTLP_GRPC_PORT:-4327}:4327"
+      - "${COLLECTOR_OTLP_HTTP_PORT:-4328}:4328"
+      # Metrics and health
+      - "${COLLECTOR_METRICS_PORT:-9091}:9091"
+      - "${COLLECTOR_HEALTH_PORT:-8082}:8082"
+    environment:
+      # OTLP endpoints
+      COLLECTOR_OTLP_GRPC_ENDPOINT: 0.0.0.0:4327
+      COLLECTOR_OTLP_HTTP_ENDPOINT: 0.0.0.0:4328
+      COLLECTOR_METRICS_ENDPOINT: 0.0.0.0:9091
+      COLLECTOR_HEALTH_ENDPOINT: 0.0.0.0:8082
+
+      # Storage backend connection
+      STORAGE_SERVICE_URL: http://storage:8081
+
+      # Database connection (for direct writes)
+      DATABASE_URL: postgresql://${DB_APP_USER:-llm_observatory_app}:${DB_APP_PASSWORD:-change_me_in_production}@timescaledb:5432/${DB_NAME:-llm_observatory}
+
+      # Redis connection
+      REDIS_URL: redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/${REDIS_DB:-0}
+
+      # Collector configuration
+      COLLECTOR_BATCH_SIZE: ${COLLECTOR_BATCH_SIZE:-500}
+      COLLECTOR_BATCH_TIMEOUT: ${COLLECTOR_BATCH_TIMEOUT:-10}
+      COLLECTOR_MAX_QUEUE_SIZE: ${COLLECTOR_MAX_QUEUE_SIZE:-10000}
+      COLLECTOR_NUM_WORKERS: ${COLLECTOR_NUM_WORKERS:-4}
+
+      # LLM-specific processing
+      COLLECTOR_LLM_ENRICHMENT_ENABLED: ${COLLECTOR_LLM_ENRICHMENT_ENABLED:-true}
+      COLLECTOR_TOKEN_COUNTING_ENABLED: ${COLLECTOR_TOKEN_COUNTING_ENABLED:-true}
+      COLLECTOR_COST_CALCULATION_ENABLED: ${COLLECTOR_COST_CALCULATION_ENABLED:-true}
+      COLLECTOR_PII_REDACTION_ENABLED: ${COLLECTOR_PII_REDACTION_ENABLED:-false}
+
+      # Logging
+      RUST_LOG: ${COLLECTOR_LOG_LEVEL:-info}
+      RUST_BACKTRACE: ${RUST_BACKTRACE:-1}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+      COLLECTOR_LOG_LEVEL: ${COLLECTOR_LOG_LEVEL:-info}
+      COLLECTOR_LOG_FORMAT: ${COLLECTOR_LOG_FORMAT:-json}
+
+      # Metrics
+      METRICS_ENABLED: ${METRICS_ENABLED:-true}
+      METRICS_PORT: 9091
+
+      # Health check
+      HEALTH_CHECK_ENABLED: ${HEALTH_CHECK_ENABLED:-true}
+      HEALTH_PORT: 8082
+
+      # OpenTelemetry protocol settings
+      OTLP_COMPRESSION: ${OTLP_COMPRESSION:-gzip}
+      OTLP_TIMEOUT: ${OTLP_TIMEOUT:-30}
+      OTLP_MAX_MESSAGE_SIZE: ${OTLP_MAX_MESSAGE_SIZE:-4194304}
+    volumes:
+      - collector_data:/app/data
+      - ./docker/config:/app/config:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+    networks:
+      - llm-observatory-network
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      storage:
+        condition: service_healthy
+
+  # Development Collector Service (hot-reload enabled)
+  collector-dev:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.collector.dev
+    image: llm-observatory/collector:dev
+    container_name: llm-observatory-collector-dev
+    restart: unless-stopped
+    ports:
+      # OTLP receivers
+      - "${COLLECTOR_DEV_OTLP_GRPC_PORT:-4337}:4327"
+      - "${COLLECTOR_DEV_OTLP_HTTP_PORT:-4338}:4328"
+      # Metrics and health
+      - "${COLLECTOR_DEV_METRICS_PORT:-9191}:9091"
+      - "${COLLECTOR_DEV_HEALTH_PORT:-8182}:8082"
+    environment:
+      # OTLP endpoints
+      COLLECTOR_OTLP_GRPC_ENDPOINT: 0.0.0.0:4327
+      COLLECTOR_OTLP_HTTP_ENDPOINT: 0.0.0.0:4328
+      COLLECTOR_METRICS_ENDPOINT: 0.0.0.0:9091
+      COLLECTOR_HEALTH_ENDPOINT: 0.0.0.0:8082
+
+      # Storage backend connection
+      STORAGE_SERVICE_URL: http://storage:8081
+
+      # Database connection
+      DATABASE_URL: postgresql://${DB_APP_USER:-llm_observatory_app}:${DB_APP_PASSWORD:-change_me_in_production}@timescaledb:5432/${DB_NAME:-llm_observatory}
+
+      # Redis connection
+      REDIS_URL: redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/${REDIS_DB:-0}
+
+      # Collector configuration
+      COLLECTOR_BATCH_SIZE: ${COLLECTOR_BATCH_SIZE:-100}
+      COLLECTOR_BATCH_TIMEOUT: ${COLLECTOR_BATCH_TIMEOUT:-5}
+      COLLECTOR_MAX_QUEUE_SIZE: ${COLLECTOR_MAX_QUEUE_SIZE:-1000}
+      COLLECTOR_NUM_WORKERS: ${COLLECTOR_NUM_WORKERS:-2}
+
+      # LLM-specific processing
+      COLLECTOR_LLM_ENRICHMENT_ENABLED: ${COLLECTOR_LLM_ENRICHMENT_ENABLED:-true}
+      COLLECTOR_TOKEN_COUNTING_ENABLED: ${COLLECTOR_TOKEN_COUNTING_ENABLED:-true}
+      COLLECTOR_COST_CALCULATION_ENABLED: ${COLLECTOR_COST_CALCULATION_ENABLED:-true}
+      COLLECTOR_PII_REDACTION_ENABLED: ${COLLECTOR_PII_REDACTION_ENABLED:-false}
+
+      # Development logging
+      RUST_LOG: debug
+      RUST_BACKTRACE: full
+      LOG_FORMAT: pretty
+      COLLECTOR_LOG_LEVEL: debug
+      COLLECTOR_LOG_FORMAT: pretty
+
+      # Metrics
+      METRICS_ENABLED: true
+      METRICS_PORT: 9091
+
+      # Health check
+      HEALTH_CHECK_ENABLED: true
+      HEALTH_PORT: 8082
+    volumes:
+      # Mount source code for hot reload
+      - .:/app
+      - cargo_cache:/usr/local/cargo/registry
+      - target_cache:/app/target
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks:
+      - llm-observatory-network
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      storage:
+        condition: service_healthy
+    profiles:
+      - dev  # Only start with --profile dev
+
+networks:
+  llm-observatory-network:
+    external: true
+
+volumes:
+  storage_data:
+    name: llm-observatory-storage-data
+  collector_data:
+    name: llm-observatory-collector-data
+  cargo_cache:
+    name: llm-observatory-cargo-cache
+  target_cache:
+    name: llm-observatory-target-cache

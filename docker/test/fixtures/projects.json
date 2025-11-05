@@ -1,0 +1,65 @@
+[
+  {
+    "id": "00000000-0000-0000-0000-000000000101",
+    "name": "Test Project 1",
+    "description": "Main test project for integration tests",
+    "owner_id": "00000000-0000-0000-0000-000000000001",
+    "settings": {
+      "retention_days": 30,
+      "enable_metrics": true,
+      "enable_tracing": true,
+      "enable_logging": true,
+      "sampling_rate": 1.0,
+      "alert_threshold": {
+        "error_rate": 0.05,
+        "latency_p95": 5000
+      }
+    }
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000000102",
+    "name": "Test Project 2",
+    "description": "Secondary test project for multi-project scenarios",
+    "owner_id": "00000000-0000-0000-0000-000000000002",
+    "settings": {
+      "retention_days": 7,
+      "enable_metrics": true,
+      "enable_tracing": true,
+      "enable_logging": false,
+      "sampling_rate": 0.1
+    }
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000000103",
+    "name": "Production Simulation",
+    "description": "Project simulating production workload for performance tests",
+    "owner_id": "00000000-0000-0000-0000-000000000001",
+    "settings": {
+      "retention_days": 90,
+      "enable_metrics": true,
+      "enable_tracing": true,
+      "enable_logging": true,
+      "sampling_rate": 0.05,
+      "batch_size": 1000,
+      "alert_threshold": {
+        "error_rate": 0.01,
+        "latency_p95": 2000,
+        "cost_per_day": 100.0
+      }
+    }
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000000104",
+    "name": "Development",
+    "description": "Development environment project",
+    "owner_id": "00000000-0000-0000-0000-000000000005",
+    "settings": {
+      "retention_days": 3,
+      "enable_metrics": true,
+      "enable_tracing": true,
+      "enable_logging": true,
+      "sampling_rate": 1.0,
+      "debug_mode": true
+    }
+  }
+]

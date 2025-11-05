@@ -1,0 +1,142 @@
+# ============================================================================
+# Production Dockerfile for LLM Observatory Storage Service
+# ============================================================================
+# Multi-stage build optimized for:
+# - Minimal image size
+# - COPY protocol performance
+# - Security (non-root user)
+# - Database migrations
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# Stage 1: Chef - Cache dependencies
+# ----------------------------------------------------------------------------
+FROM lukemathwalker/cargo-chef:latest-rust-1.75 AS chef
+WORKDIR /app
+
+# ----------------------------------------------------------------------------
+# Stage 2: Planner - Analyze dependencies
+# ----------------------------------------------------------------------------
+FROM chef AS planner
+COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
+
+# ----------------------------------------------------------------------------
+# Stage 3: Builder - Build the application
+# ----------------------------------------------------------------------------
+FROM chef AS builder
+
+# Install system dependencies for sqlx
+RUN apt-get update && apt-get install -y \
+    libssl-dev \
+    pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy dependency recipe and build dependencies (cached layer)
+COPY --from=planner /app/recipe.json recipe.json
+RUN cargo chef cook --release --recipe-path recipe.json
+
+# Copy source code
+COPY . .
+
+# Build the storage service binary
+# Note: Since storage is a library crate, we need to create a binary for it
+# This will build the storage service with all optimizations
+RUN cargo build --release --package llm-observatory-storage --bin storage-service
+
+# Install sqlx-cli for migrations (specific version for compatibility)
+RUN cargo install sqlx-cli --version 0.8.0 --no-default-features --features postgres,rustls
+
+# ----------------------------------------------------------------------------
+# Stage 4: Runtime - Minimal production image
+# ----------------------------------------------------------------------------
+FROM debian:bookworm-slim AS runtime
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    libssl3 \
+    libpq5 \
+    # Required for health checks and debugging
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user for running the application
+RUN groupadd -r storage && useradd -r -g storage -u 1000 storage
+
+# Create application directories
+RUN mkdir -p /app/migrations /app/config && \
+    chown -R storage:storage /app
+
+WORKDIR /app
+
+# Copy binary from builder
+COPY --from=builder /app/target/release/storage-service /usr/local/bin/storage-service
+RUN chmod +x /usr/local/bin/storage-service
+
+# Copy sqlx-cli from builder
+COPY --from=builder /usr/local/cargo/bin/sqlx /usr/local/bin/sqlx
+RUN chmod +x /usr/local/bin/sqlx
+
+# Copy migration files
+COPY --chown=storage:storage crates/storage/migrations /app/migrations/
+
+# Copy configuration examples (optional, can be overridden by volumes)
+COPY --chown=storage:storage crates/storage/.env.example /app/config/env.example
+
+# Switch to non-root user
+USER storage
+
+# Environment variables with sensible defaults
+ENV RUST_LOG=info \
+    RUST_BACKTRACE=1 \
+    # Database configuration
+    DB_POOL_MIN_SIZE=5 \
+    DB_POOL_MAX_SIZE=20 \
+    DB_POOL_TIMEOUT=30 \
+    # COPY protocol optimizations
+    COPY_BATCH_SIZE=10000 \
+    COPY_FLUSH_INTERVAL=1000 \
+    COPY_BUFFER_SIZE=8192 \
+    # Server configuration
+    APP_HOST=0.0.0.0 \
+    APP_PORT=8080 \
+    METRICS_PORT=9090 \
+    HEALTH_CHECK_ENABLED=true \
+    METRICS_ENABLED=true
+
+# Expose ports
+# 8080 - Internal API port for health/admin endpoints
+# 9090 - Prometheus metrics endpoint
+EXPOSE 8080 9090
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:8080/health || exit 1
+
+# Copy entrypoint script
+COPY --chown=storage:storage docker/entrypoint-storage.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+# Use entrypoint for migration and startup
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+CMD ["storage-service"]
+
+# ============================================================================
+# Build instructions:
+#
+# Build from repository root:
+#   docker build -f docker/Dockerfile.storage -t llm-observatory-storage:latest .
+#
+# Run with docker-compose (recommended):
+#   docker-compose up storage
+#
+# Run standalone:
+#   docker run -d \
+#     --name storage \
+#     -p 8080:8080 \
+#     -p 9090:9090 \
+#     -e DATABASE_URL=postgresql://user:pass@host:5432/db \
+#     -e REDIS_URL=redis://:password@host:6379/0 \
+#     llm-observatory-storage:latest
+# ============================================================================

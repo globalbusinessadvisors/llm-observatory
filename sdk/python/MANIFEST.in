@@ -1,0 +1,6 @@
+include README.md
+include LICENSE
+include NOTICE
+recursive-include llm_observatory *.py
+recursive-exclude tests *
+recursive-exclude examples *

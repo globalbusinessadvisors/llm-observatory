@@ -1,0 +1,20 @@
+# Source files
+src/
+test/
+examples/
+
+# Configuration
+tsconfig.json
+.eslintrc.js
+.prettierrc
+jest.config.js
+
+# Development
+.github/
+.vscode/
+coverage/
+*.log
+
+# Git
+.git/
+.gitignore

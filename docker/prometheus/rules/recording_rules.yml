@@ -1,0 +1,369 @@
+# Prometheus Recording Rules for LLM Observatory
+#
+# These rules pre-compute expensive queries to improve dashboard performance
+# and enable efficient alerting on complex metrics.
+#
+# Recording rules are evaluated at the global evaluation_interval (15s by default).
+
+groups:
+  ##############################################################################
+  # Database Performance Recording Rules
+  ##############################################################################
+  - name: database_performance
+    interval: 30s
+    rules:
+      # Query rate per second (all queries)
+      - record: db:queries_per_second:rate5m
+        expr: |
+          sum(rate(pg_stat_database_xact_commit{job="timescaledb"}[5m])) by (instance, datname)
+
+      # Transaction rollback rate
+      - record: db:rollback_rate:rate5m
+        expr: |
+          sum(rate(pg_stat_database_xact_rollback{job="timescaledb"}[5m])) by (instance, datname)
+
+      # Transaction rollback percentage
+      - record: db:rollback_percentage:rate5m
+        expr: |
+          (
+            sum(rate(pg_stat_database_xact_rollback{job="timescaledb"}[5m])) by (instance, datname)
+            /
+            (
+              sum(rate(pg_stat_database_xact_commit{job="timescaledb"}[5m])) by (instance, datname)
+              +
+              sum(rate(pg_stat_database_xact_rollback{job="timescaledb"}[5m])) by (instance, datname)
+            )
+          ) * 100
+
+      # Connection pool utilization percentage
+      - record: db:connection_pool_utilization:ratio
+        expr: |
+          (
+            pg_stat_database_numbackends{job="timescaledb"}
+            /
+            on(instance) group_left pg_settings_max_connections{job="timescaledb"}
+          ) * 100
+
+      # Database size growth rate (bytes per hour)
+      - record: db:size_growth:rate1h
+        expr: |
+          deriv(pg_database_size_bytes{job="timescaledb"}[1h]) * 3600
+
+      # Cache hit ratio percentage
+      - record: db:cache_hit_ratio:rate5m
+        expr: |
+          (
+            sum(rate(pg_stat_database_blks_hit{job="timescaledb"}[5m])) by (instance, datname)
+            /
+            (
+              sum(rate(pg_stat_database_blks_hit{job="timescaledb"}[5m])) by (instance, datname)
+              +
+              sum(rate(pg_stat_database_blks_read{job="timescaledb"}[5m])) by (instance, datname)
+            )
+          ) * 100
+
+  ##############################################################################
+  # Query Performance Recording Rules
+  ##############################################################################
+  - name: query_performance
+    interval: 30s
+    rules:
+      # P50 query duration
+      - record: db:query_duration_seconds:p50
+        expr: |
+          histogram_quantile(0.50,
+            rate(pg_stat_statements_total_time_bucket{job="timescaledb"}[5m])
+          )
+
+      # P95 query duration
+      - record: db:query_duration_seconds:p95
+        expr: |
+          histogram_quantile(0.95,
+            rate(pg_stat_statements_total_time_bucket{job="timescaledb"}[5m])
+          )
+
+      # P99 query duration
+      - record: db:query_duration_seconds:p99
+        expr: |
+          histogram_quantile(0.99,
+            rate(pg_stat_statements_total_time_bucket{job="timescaledb"}[5m])
+          )
+
+      # Average query duration
+      - record: db:query_duration_seconds:avg
+        expr: |
+          avg(rate(pg_stat_statements_total_time{job="timescaledb"}[5m]))
+          /
+          avg(rate(pg_stat_statements_calls{job="timescaledb"}[5m]))
+
+  ##############################################################################
+  # Redis Performance Recording Rules
+  ##############################################################################
+  - name: redis_performance
+    interval: 30s
+    rules:
+      # Cache hit rate percentage
+      - record: redis:cache_hit_rate:rate5m
+        expr: |
+          (
+            rate(redis_keyspace_hits_total{job="redis"}[5m])
+            /
+            (
+              rate(redis_keyspace_hits_total{job="redis"}[5m])
+              +
+              rate(redis_keyspace_misses_total{job="redis"}[5m])
+            )
+          ) * 100
+
+      # Memory utilization percentage
+      - record: redis:memory_utilization:ratio
+        expr: |
+          (
+            redis_memory_used_bytes{job="redis"}
+            /
+            redis_memory_max_bytes{job="redis"}
+          ) * 100
+
+      # Operations per second
+      - record: redis:ops_per_second:rate5m
+        expr: |
+          sum(rate(redis_commands_total{job="redis"}[5m])) by (instance)
+
+      # Evictions per second
+      - record: redis:evictions_per_second:rate5m
+        expr: |
+          rate(redis_evicted_keys_total{job="redis"}[5m])
+
+  ##############################################################################
+  # Application Performance Recording Rules
+  ##############################################################################
+  - name: application_performance
+    interval: 30s
+    rules:
+      # HTTP request rate by service
+      - record: http:requests_per_second:rate5m
+        expr: |
+          sum(rate(http_requests_total[5m])) by (service, method, status)
+
+      # HTTP error rate percentage
+      - record: http:error_rate:rate5m
+        expr: |
+          (
+            sum(rate(http_requests_total{status=~"5.."}[5m])) by (service)
+            /
+            sum(rate(http_requests_total[5m])) by (service)
+          ) * 100
+
+      # HTTP P50 latency
+      - record: http:request_duration_seconds:p50
+        expr: |
+          histogram_quantile(0.50,
+            sum(rate(http_request_duration_seconds_bucket[5m])) by (service, le)
+          )
+
+      # HTTP P95 latency
+      - record: http:request_duration_seconds:p95
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(http_request_duration_seconds_bucket[5m])) by (service, le)
+          )
+
+      # HTTP P99 latency
+      - record: http:request_duration_seconds:p99
+        expr: |
+          histogram_quantile(0.99,
+            sum(rate(http_request_duration_seconds_bucket[5m])) by (service, le)
+          )
+
+  ##############################################################################
+  # LLM-Specific Recording Rules
+  ##############################################################################
+  - name: llm_metrics
+    interval: 30s
+    rules:
+      # LLM requests per second
+      - record: llm:requests_per_second:rate5m
+        expr: |
+          sum(rate(llm_requests_total[5m])) by (model, provider)
+
+      # Average tokens per request
+      - record: llm:tokens_per_request:avg
+        expr: |
+          sum(rate(llm_tokens_total[5m])) by (model, provider, token_type)
+          /
+          sum(rate(llm_requests_total[5m])) by (model, provider)
+
+      # Cost per request (USD)
+      - record: llm:cost_per_request_usd:avg
+        expr: |
+          sum(rate(llm_cost_usd_total[5m])) by (model, provider)
+          /
+          sum(rate(llm_requests_total[5m])) by (model, provider)
+
+      # P50 LLM latency
+      - record: llm:duration_seconds:p50
+        expr: |
+          histogram_quantile(0.50,
+            sum(rate(llm_duration_seconds_bucket[5m])) by (model, provider, le)
+          )
+
+      # P95 LLM latency
+      - record: llm:duration_seconds:p95
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(llm_duration_seconds_bucket[5m])) by (model, provider, le)
+          )
+
+      # P99 LLM latency
+      - record: llm:duration_seconds:p99
+        expr: |
+          histogram_quantile(0.99,
+            sum(rate(llm_duration_seconds_bucket[5m])) by (model, provider, le)
+          )
+
+      # Error rate by model
+      - record: llm:error_rate:rate5m
+        expr: |
+          (
+            sum(rate(llm_requests_total{status="error"}[5m])) by (model, provider)
+            /
+            sum(rate(llm_requests_total[5m])) by (model, provider)
+          ) * 100
+
+  ##############################################################################
+  # System Resource Recording Rules
+  ##############################################################################
+  - name: system_resources
+    interval: 30s
+    rules:
+      # CPU utilization percentage
+      - record: node:cpu_utilization:ratio
+        expr: |
+          (
+            1 - avg(rate(node_cpu_seconds_total{mode="idle",job="node"}[5m])) by (instance)
+          ) * 100
+
+      # Memory utilization percentage
+      - record: node:memory_utilization:ratio
+        expr: |
+          (
+            1 - (
+              node_memory_MemAvailable_bytes{job="node"}
+              /
+              node_memory_MemTotal_bytes{job="node"}
+            )
+          ) * 100
+
+      # Disk utilization percentage
+      - record: node:disk_utilization:ratio
+        expr: |
+          (
+            1 - (
+              node_filesystem_avail_bytes{job="node",fstype!~"tmpfs|fuse.lxcfs|squashfs|vfat"}
+              /
+              node_filesystem_size_bytes{job="node",fstype!~"tmpfs|fuse.lxcfs|squashfs|vfat"}
+            )
+          ) * 100
+
+      # Network receive rate (bytes/sec)
+      - record: node:network_receive_bytes:rate5m
+        expr: |
+          sum(rate(node_network_receive_bytes_total{job="node"}[5m])) by (instance, device)
+
+      # Network transmit rate (bytes/sec)
+      - record: node:network_transmit_bytes:rate5m
+        expr: |
+          sum(rate(node_network_transmit_bytes_total{job="node"}[5m])) by (instance, device)
+
+      # Disk I/O rate (operations/sec)
+      - record: node:disk_io_operations:rate5m
+        expr: |
+          sum(rate(node_disk_io_time_seconds_total{job="node"}[5m])) by (instance, device)
+
+  ##############################################################################
+  # Collector Performance Recording Rules
+  ##############################################################################
+  - name: collector_performance
+    interval: 30s
+    rules:
+      # Spans received per second
+      - record: collector:spans_received_per_second:rate5m
+        expr: |
+          sum(rate(collector_spans_received_total[5m])) by (instance)
+
+      # Spans processed per second
+      - record: collector:spans_processed_per_second:rate5m
+        expr: |
+          sum(rate(collector_spans_processed_total[5m])) by (instance, processor)
+
+      # Spans dropped per second
+      - record: collector:spans_dropped_per_second:rate5m
+        expr: |
+          sum(rate(collector_spans_dropped_total[5m])) by (instance, reason)
+
+      # Collector processing latency P95
+      - record: collector:processing_duration_seconds:p95
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(collector_processing_duration_seconds_bucket[5m])) by (processor, le)
+          )
+
+      # Batch export latency P95
+      - record: collector:batch_export_duration_seconds:p95
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(collector_batch_export_duration_seconds_bucket[5m])) by (exporter, le)
+          )
+
+  ##############################################################################
+  # Storage Layer Recording Rules
+  ##############################################################################
+  - name: storage_performance
+    interval: 30s
+    rules:
+      # Write throughput (spans/sec)
+      - record: storage:write_throughput_spans:rate5m
+        expr: |
+          sum(rate(storage_spans_written_total[5m])) by (instance, table)
+
+      # Write latency P95
+      - record: storage:write_duration_seconds:p95
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(storage_write_duration_seconds_bucket[5m])) by (operation, le)
+          )
+
+      # Query throughput (queries/sec)
+      - record: storage:query_throughput:rate5m
+        expr: |
+          sum(rate(storage_queries_total[5m])) by (instance, query_type)
+
+      # Query latency P95
+      - record: storage:query_duration_seconds:p95
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(storage_query_duration_seconds_bucket[5m])) by (query_type, le)
+          )
+
+  ##############################################################################
+  # Jaeger Tracing Recording Rules
+  ##############################################################################
+  - name: jaeger_performance
+    interval: 30s
+    rules:
+      # Spans received per second
+      - record: jaeger:spans_received_per_second:rate5m
+        expr: |
+          sum(rate(jaeger_collector_spans_received_total[5m])) by (instance)
+
+      # Spans saved per second
+      - record: jaeger:spans_saved_per_second:rate5m
+        expr: |
+          sum(rate(jaeger_collector_spans_saved_total[5m])) by (instance)
+
+      # Storage latency P95
+      - record: jaeger:storage_latency_seconds:p95
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(jaeger_storage_latency_bucket[5m])) by (operation, le)
+          )

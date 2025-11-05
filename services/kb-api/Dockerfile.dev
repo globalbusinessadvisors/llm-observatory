@@ -1,0 +1,30 @@
+FROM node:20-alpine
+
+# Install development dependencies
+RUN apk add --no-cache \
+    python3 \
+    make \
+    g++ \
+    tini
+
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+COPY tsconfig.json ./
+
+# Install all dependencies (including dev)
+RUN npm install && \
+    npm cache clean --force
+
+# Create directories
+RUN mkdir -p /app/uploads /app/logs /app/src
+
+# Expose port
+EXPOSE 3001
+
+# Use tini for proper signal handling
+ENTRYPOINT ["/sbin/tini", "--"]
+
+# Start in development mode with hot reload
+CMD ["npm", "run", "dev"]

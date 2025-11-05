@@ -1,0 +1,252 @@
+# Multi-stage Dockerfile for testing LLM Observatory
+# Optimized for fast test execution with caching and parallel builds
+
+# =============================================================================
+# Stage 1: Base test image with Rust and system dependencies
+# =============================================================================
+FROM rust:1.75.0-slim-bookworm AS base-test
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    # Build essentials
+    build-essential \
+    pkg-config \
+    libssl-dev \
+    # Database clients for testing
+    postgresql-client \
+    redis-tools \
+    # Network tools for debugging
+    curl \
+    wget \
+    netcat-openbsd \
+    iputils-ping \
+    # Additional tools
+    git \
+    ca-certificates \
+    # Cleanup
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /workspace
+
+# Configure Rust for faster builds
+ENV CARGO_HOME=/usr/local/cargo
+ENV RUSTFLAGS="-C target-cpu=native"
+ENV CARGO_INCREMENTAL=1
+ENV CARGO_NET_RETRY=10
+ENV CARGO_TERM_COLOR=always
+
+# =============================================================================
+# Stage 2: Test tools installation
+# =============================================================================
+FROM base-test AS test-tools-installer
+
+# Install cargo-nextest for faster test execution
+RUN cargo install cargo-nextest --version 0.9.68 --locked
+
+# Install cargo-tarpaulin for code coverage
+RUN cargo install cargo-tarpaulin --version 0.31.0 --locked
+
+# Install cargo-llvm-cov as alternative coverage tool
+RUN cargo install cargo-llvm-cov --version 0.6.9 --locked
+
+# Install cargo-audit for security auditing in tests
+RUN cargo install cargo-audit --version 0.20.0 --locked
+
+# Install cargo-deny for dependency checking
+RUN cargo install cargo-deny --version 0.14.24 --locked
+
+# Install sqlx-cli for database migrations in tests
+RUN cargo install sqlx-cli --version 0.8.0 --no-default-features --features postgres,rustls --locked
+
+# Install cargo-watch for development testing
+RUN cargo install cargo-watch --version 8.5.2 --locked
+
+# =============================================================================
+# Stage 3: Dependencies caching layer
+# =============================================================================
+FROM base-test AS deps-cache
+
+# Copy only Cargo files for dependency caching
+COPY Cargo.toml Cargo.lock ./
+COPY crates/core/Cargo.toml crates/core/
+COPY crates/collector/Cargo.toml crates/collector/
+COPY crates/storage/Cargo.toml crates/storage/
+COPY crates/api/Cargo.toml crates/api/
+COPY crates/sdk/Cargo.toml crates/sdk/
+COPY crates/providers/Cargo.toml crates/providers/
+COPY crates/cli/Cargo.toml crates/cli/
+
+# Create dummy source files to build dependencies
+RUN mkdir -p crates/core/src && echo "fn main() {}" > crates/core/src/lib.rs && \
+    mkdir -p crates/collector/src && echo "fn main() {}" > crates/collector/src/lib.rs && \
+    mkdir -p crates/storage/src && echo "fn main() {}" > crates/storage/src/lib.rs && \
+    mkdir -p crates/api/src && echo "fn main() {}" > crates/api/src/lib.rs && \
+    mkdir -p crates/sdk/src && echo "fn main() {}" > crates/sdk/src/lib.rs && \
+    mkdir -p crates/providers/src && echo "fn main() {}" > crates/providers/src/lib.rs && \
+    mkdir -p crates/cli/src && echo "fn main() {}" > crates/cli/src/main.rs
+
+# Build dependencies only
+RUN cargo build --workspace --tests --release && \
+    cargo build --workspace --tests --profile dev
+
+# Clean up dummy files
+RUN find crates -name "*.rs" -type f -delete
+
+# =============================================================================
+# Stage 4: Test tools with dependencies
+# =============================================================================
+FROM deps-cache AS test-tools
+
+# Copy installed tools from installer stage
+COPY --from=test-tools-installer /usr/local/cargo/bin/cargo-nextest /usr/local/cargo/bin/
+COPY --from=test-tools-installer /usr/local/cargo/bin/cargo-tarpaulin /usr/local/cargo/bin/
+COPY --from=test-tools-installer /usr/local/cargo/bin/cargo-llvm-cov /usr/local/cargo/bin/
+COPY --from=test-tools-installer /usr/local/cargo/bin/cargo-audit /usr/local/cargo/bin/
+COPY --from=test-tools-installer /usr/local/cargo/bin/cargo-deny /usr/local/cargo/bin/
+COPY --from=test-tools-installer /usr/local/cargo/bin/sqlx /usr/local/cargo/bin/
+COPY --from=test-tools-installer /usr/local/cargo/bin/cargo-watch /usr/local/cargo/bin/
+
+# Copy test scripts
+COPY docker/test/*.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/*.sh
+
+# Configure nextest
+RUN mkdir -p /workspace/.config/nextest
+COPY docker/test/.config/nextest.toml /workspace/.config/nextest/config.toml
+
+# Set default environment variables for testing
+ENV RUST_BACKTRACE=1
+ENV RUST_LOG=info
+ENV CARGO_TERM_COLOR=always
+ENV NEXTEST_EXPERIMENTAL_LIBTEST_JSON=1
+
+# =============================================================================
+# Stage 5: Test builder - compiles tests
+# =============================================================================
+FROM test-tools AS test-builder
+
+# Copy source code
+COPY . /workspace/
+
+# Build all tests (but don't run them yet)
+RUN cargo nextest archive \
+    --workspace \
+    --all-features \
+    --archive-file /tmp/nextest-archive.tar.zst \
+    --archive-format tar-zst
+
+# Build documentation tests separately
+RUN cargo test --workspace --doc --no-run
+
+# =============================================================================
+# Stage 6: Test runner - final image for running tests
+# =============================================================================
+FROM test-tools AS test-runner
+
+# Copy compiled tests from builder
+COPY --from=test-builder /workspace/target /workspace/target
+COPY --from=test-builder /tmp/nextest-archive.tar.zst /tmp/
+
+# Copy source code (needed for coverage and some tests)
+COPY . /workspace/
+
+# Create directories for test outputs
+RUN mkdir -p \
+    /workspace/test-results \
+    /workspace/coverage \
+    /workspace/target/criterion
+
+# Health check script
+RUN echo '#!/bin/sh\necho "Test runner is ready"' > /healthcheck.sh && \
+    chmod +x /healthcheck.sh
+
+HEALTHCHECK --interval=10s --timeout=5s --start-period=5s --retries=3 \
+    CMD ["/healthcheck.sh"]
+
+# Default command runs all tests
+CMD ["cargo", "nextest", "run", "--workspace", "--all-features"]
+
+# =============================================================================
+# Stage 7: Coverage runner - specialized for coverage generation
+# =============================================================================
+FROM test-runner AS coverage-runner
+
+# Additional coverage configuration
+ENV RUSTFLAGS="-C instrument-coverage"
+ENV LLVM_PROFILE_FILE="/workspace/coverage/llm-observatory-%p-%m.profraw"
+
+# Default command generates coverage
+CMD ["cargo", "tarpaulin", \
+     "--workspace", \
+     "--all-features", \
+     "--engine", "llvm", \
+     "--out", "Html", \
+     "--out", "Lcov", \
+     "--out", "Json", \
+     "--output-dir", "/workspace/coverage", \
+     "--timeout", "600", \
+     "--follow-exec", \
+     "--verbose"]
+
+# =============================================================================
+# Stage 8: Development test environment
+# =============================================================================
+FROM test-tools AS test-dev
+
+# Copy source code
+COPY . /workspace/
+
+# Install additional development tools
+RUN cargo install cargo-edit --version 0.12.2 --locked && \
+    cargo install cargo-outdated --version 0.15.0 --locked
+
+# Configure for watch mode
+ENV CARGO_WATCH_IGNORE=".git,target/debug,.idea"
+
+# Default command for development (watch mode)
+CMD ["cargo", "watch", "-x", "nextest run", "-c"]
+
+# =============================================================================
+# Stage 9: Minimal test runner for CI/CD
+# =============================================================================
+FROM test-runner AS test-ci
+
+# Remove unnecessary files for CI
+RUN rm -rf \
+    /usr/local/cargo/registry/cache \
+    /workspace/target/*/incremental \
+    /workspace/target/*/.fingerprint
+
+# Optimize for CI execution
+ENV CI=true
+ENV CARGO_INCREMENTAL=0
+ENV RUST_BACKTRACE=full
+
+# CI-specific test configuration
+CMD ["sh", "-c", "\
+    echo 'Starting CI test suite...' && \
+    cargo nextest run \
+        --workspace \
+        --all-features \
+        --no-fail-fast \
+        --status-level all \
+        --failure-output immediate-final \
+        --profile ci \
+    "]
+
+# =============================================================================
+# Stage 10: Security audit runner
+# =============================================================================
+FROM test-tools AS security-audit
+
+COPY Cargo.* ./
+COPY crates/*/Cargo.toml crates/*/
+
+# Run security audits
+CMD ["sh", "-c", "\
+    echo 'Running security audit...' && \
+    cargo audit --json > /workspace/test-results/audit.json && \
+    echo 'Running dependency check...' && \
+    cargo deny check --config /workspace/.cargo/deny.toml \
+    "]

@@ -1,0 +1,227 @@
+# =============================================================================
+# LLM Observatory Collector Service - Docker Makefile
+# =============================================================================
+# Convenient commands for building, running, and managing the collector service
+# =============================================================================
+
+.PHONY: help build build-dev run run-dev stop logs clean test
+
+# Default target
+.DEFAULT_GOAL := help
+
+# Variables
+COMPOSE := docker compose -f ../docker-compose.yml -f ../docker-compose.app.yml
+IMAGE_NAME := llm-observatory/collector
+VERSION := latest
+
+# Colors for output
+BLUE := \033[0;34m
+GREEN := \033[0;32m
+YELLOW := \033[0;33m
+RED := \033[0;31m
+NC := \033[0m # No Color
+
+##@ General
+
+help: ## Display this help message
+	@echo "$(BLUE)LLM Observatory Collector Service$(NC)"
+	@echo "$(BLUE)=====================================$(NC)"
+	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make $(YELLOW)<target>$(NC)\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  $(GREEN)%-20s$(NC) %s\n", $$1, $$2 } /^##@/ { printf "\n$(BLUE)%s$(NC)\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
+
+##@ Build
+
+build: ## Build production collector image
+	@echo "$(BLUE)Building production collector image...$(NC)"
+	docker build -f Dockerfile.collector -t $(IMAGE_NAME):$(VERSION) ..
+	@echo "$(GREEN)✓ Production image built successfully$(NC)"
+
+build-dev: ## Build development collector image
+	@echo "$(BLUE)Building development collector image...$(NC)"
+	docker build -f Dockerfile.collector.dev -t $(IMAGE_NAME):dev ..
+	@echo "$(GREEN)✓ Development image built successfully$(NC)"
+
+build-no-cache: ## Build production image without cache
+	@echo "$(BLUE)Building production collector image (no cache)...$(NC)"
+	docker build --no-cache -f Dockerfile.collector -t $(IMAGE_NAME):$(VERSION) ..
+	@echo "$(GREEN)✓ Production image built successfully$(NC)"
+
+##@ Run
+
+up: ## Start collector service (production)
+	@echo "$(BLUE)Starting collector service...$(NC)"
+	$(COMPOSE) up -d collector
+	@echo "$(GREEN)✓ Collector service started$(NC)"
+	@echo "$(YELLOW)OTLP gRPC:$(NC) http://localhost:4327"
+	@echo "$(YELLOW)OTLP HTTP:$(NC) http://localhost:4328"
+	@echo "$(YELLOW)Metrics:$(NC)    http://localhost:9091/metrics"
+	@echo "$(YELLOW)Health:$(NC)     http://localhost:8082/health"
+
+up-dev: ## Start collector service (development with hot reload)
+	@echo "$(BLUE)Starting collector service (development)...$(NC)"
+	$(COMPOSE) --profile dev up -d collector-dev
+	@echo "$(GREEN)✓ Collector development service started$(NC)"
+	@echo "$(YELLOW)OTLP gRPC:$(NC) http://localhost:4337"
+	@echo "$(YELLOW)OTLP HTTP:$(NC) http://localhost:4338"
+	@echo "$(YELLOW)Metrics:$(NC)    http://localhost:9191/metrics"
+	@echo "$(YELLOW)Health:$(NC)     http://localhost:8182/health"
+
+down: ## Stop collector service
+	@echo "$(BLUE)Stopping collector service...$(NC)"
+	$(COMPOSE) stop collector collector-dev
+	@echo "$(GREEN)✓ Collector service stopped$(NC)"
+
+restart: down up ## Restart collector service
+
+restart-dev: ## Restart development collector service
+	@echo "$(BLUE)Restarting collector development service...$(NC)"
+	$(COMPOSE) --profile dev restart collector-dev
+	@echo "$(GREEN)✓ Collector development service restarted$(NC)"
+
+##@ Logs
+
+logs: ## View collector logs (follow)
+	$(COMPOSE) logs -f collector
+
+logs-dev: ## View development collector logs (follow)
+	$(COMPOSE) logs -f collector-dev
+
+logs-tail: ## View last 100 lines of collector logs
+	$(COMPOSE) logs --tail=100 collector
+
+##@ Monitoring
+
+health: ## Check collector health
+	@echo "$(BLUE)Checking collector health...$(NC)"
+	@curl -sf http://localhost:8082/health || (echo "$(RED)✗ Collector is unhealthy$(NC)" && exit 1)
+	@echo "$(GREEN)✓ Collector is healthy$(NC)"
+
+metrics: ## View collector metrics
+	@echo "$(BLUE)Fetching collector metrics...$(NC)"
+	@curl -s http://localhost:9091/metrics | grep llm_observatory_collector
+
+status: ## Check collector container status
+	@echo "$(BLUE)Collector container status:$(NC)"
+	$(COMPOSE) ps collector
+
+inspect: ## Inspect collector container
+	$(COMPOSE) exec collector /usr/local/bin/collector --version
+
+##@ Testing
+
+test-grpc: ## Send test trace via OTLP gRPC
+	@echo "$(BLUE)Sending test trace via OTLP gRPC...$(NC)"
+	@echo "$(YELLOW)Note: Requires grpcurl to be installed$(NC)"
+	@grpcurl -plaintext \
+		-d '{"resource_spans":[{"scope_spans":[{"spans":[{"trace_id":"0102030405060708090a0b0c0d0e0f10","span_id":"0102030405060708","name":"test-span","kind":1,"start_time_unix_nano":1234567890000000000,"end_time_unix_nano":1234567891000000000}]}]}]}' \
+		localhost:4327 \
+		opentelemetry.proto.collector.trace.v1.TraceService/Export
+	@echo "$(GREEN)✓ Test trace sent$(NC)"
+
+test-http: ## Send test trace via OTLP HTTP
+	@echo "$(BLUE)Sending test trace via OTLP HTTP...$(NC)"
+	@curl -X POST http://localhost:4328/v1/traces \
+		-H "Content-Type: application/json" \
+		-d '{"resourceSpans":[{"scopeSpans":[{"spans":[{"traceId":"0102030405060708090a0b0c0d0e0f10","spanId":"0102030405060708","name":"test-span","kind":1,"startTimeUnixNano":"1234567890000000000","endTimeUnixNano":"1234567891000000000"}]}]}]}'
+	@echo "$(GREEN)✓ Test trace sent$(NC)"
+
+benchmark: ## Run performance benchmark
+	@echo "$(BLUE)Running collector benchmark...$(NC)"
+	@echo "$(YELLOW)Sending 1000 test traces...$(NC)"
+	@for i in $$(seq 1 1000); do \
+		curl -s -X POST http://localhost:4328/v1/traces \
+			-H "Content-Type: application/json" \
+			-d '{"resourceSpans":[{"scopeSpans":[{"spans":[{"traceId":"'$$(openssl rand -hex 16)'","spanId":"'$$(openssl rand -hex 8)'","name":"benchmark-span-'$$i'","kind":1,"startTimeUnixNano":"1234567890000000000","endTimeUnixNano":"1234567891000000000"}]}]}]}' \
+			> /dev/null & \
+	done; wait
+	@echo "$(GREEN)✓ Benchmark complete$(NC)"
+	@echo "$(BLUE)Check metrics:$(NC) make metrics"
+
+##@ Database
+
+db-check: ## Check database connectivity
+	@echo "$(BLUE)Checking database connection...$(NC)"
+	$(COMPOSE) exec collector sh -c 'if command -v psql > /dev/null; then psql $$DATABASE_URL -c "SELECT 1"; else echo "psql not available in collector container"; fi'
+
+redis-check: ## Check Redis connectivity
+	@echo "$(BLUE)Checking Redis connection...$(NC)"
+	$(COMPOSE) exec collector sh -c 'if command -v redis-cli > /dev/null; then redis-cli -u $$REDIS_URL PING; else echo "redis-cli not available in collector container"; fi'
+
+##@ Development
+
+shell: ## Open shell in collector container
+	$(COMPOSE) exec collector sh
+
+shell-dev: ## Open shell in development collector container
+	$(COMPOSE) exec collector-dev sh
+
+watch: ## Watch collector logs with grep filter (usage: make watch FILTER=error)
+	$(COMPOSE) logs -f collector | grep --color=auto "$(FILTER)"
+
+env: ## Show collector environment variables
+	$(COMPOSE) exec collector env | grep -E '(COLLECTOR|DATABASE|REDIS|OTLP)' | sort
+
+config: ## Show collector configuration
+	@echo "$(BLUE)Collector configuration:$(NC)"
+	$(COMPOSE) exec collector cat /app/config/collector.yaml
+
+##@ Cleanup
+
+clean: ## Remove collector container and volumes
+	@echo "$(BLUE)Cleaning collector resources...$(NC)"
+	$(COMPOSE) down collector collector-dev -v
+	@echo "$(GREEN)✓ Collector resources cleaned$(NC)"
+
+prune: ## Remove collector images
+	@echo "$(BLUE)Removing collector images...$(NC)"
+	docker rmi $(IMAGE_NAME):$(VERSION) $(IMAGE_NAME):dev 2>/dev/null || true
+	@echo "$(GREEN)✓ Collector images removed$(NC)"
+
+clean-all: clean prune ## Clean everything (containers, volumes, images)
+
+##@ CI/CD
+
+ci-build: ## Build for CI/CD pipeline
+	@echo "$(BLUE)Building collector for CI/CD...$(NC)"
+	docker build \
+		--build-arg RUST_VERSION=1.75 \
+		--build-arg BUILD_DATE=$$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
+		--build-arg VCS_REF=$$(git rev-parse --short HEAD) \
+		-f Dockerfile.collector \
+		-t $(IMAGE_NAME):$(VERSION) \
+		-t $(IMAGE_NAME):$$(git rev-parse --short HEAD) \
+		..
+	@echo "$(GREEN)✓ CI/CD build complete$(NC)"
+
+ci-test: ## Run CI/CD tests
+	@echo "$(BLUE)Running CI/CD tests...$(NC)"
+	@echo "$(YELLOW)1. Starting collector...$(NC)"
+	$(COMPOSE) up -d collector
+	@echo "$(YELLOW)2. Waiting for health check...$(NC)"
+	@sleep 10
+	@echo "$(YELLOW)3. Testing health endpoint...$(NC)"
+	@curl -sf http://localhost:8082/health || exit 1
+	@echo "$(YELLOW)4. Testing metrics endpoint...$(NC)"
+	@curl -sf http://localhost:9091/metrics > /dev/null || exit 1
+	@echo "$(YELLOW)5. Sending test trace...$(NC)"
+	@make test-http
+	@echo "$(GREEN)✓ CI/CD tests passed$(NC)"
+
+##@ Documentation
+
+docs: ## Generate collector documentation
+	@echo "$(BLUE)Collector documentation:$(NC)"
+	@cat COLLECTOR_README.md
+
+ports: ## Show port mappings
+	@echo "$(BLUE)Collector port mappings:$(NC)"
+	@echo "$(GREEN)Production:$(NC)"
+	@echo "  OTLP gRPC: 4327"
+	@echo "  OTLP HTTP: 4328"
+	@echo "  Metrics:   9091"
+	@echo "  Health:    8082"
+	@echo ""
+	@echo "$(GREEN)Development:$(NC)"
+	@echo "  OTLP gRPC: 4337"
+	@echo "  OTLP HTTP: 4338"
+	@echo "  Metrics:   9191"
+	@echo "  Health:    8182"

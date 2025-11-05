@@ -1,0 +1,1093 @@
+version: '3.8'
+
+# Production Docker Compose Configuration for LLM Observatory
+#
+# Security Features:
+# - Non-root users for all services
+# - Read-only root filesystems where possible
+# - Capability dropping
+# - Resource limits
+# - Network isolation
+# - Secret management via Docker secrets or external providers
+#
+# Reliability Features:
+# - Health checks with strict timeouts
+# - Automatic restart policies
+# - Resource reservations and limits
+# - Dependency management
+# - Graceful shutdown handling
+#
+# Scaling Features:
+# - PostgreSQL read replicas
+# - Redis Sentinel for high availability
+# - Load balancing ready
+# - Horizontal scaling support
+#
+# IMPORTANT:
+# - Use .env.production for environment variables
+# - Store secrets in external secret management system (AWS Secrets Manager, HashiCorp Vault, etc.)
+# - Review and adjust resource limits based on your infrastructure
+# - Enable TLS/SSL for all services in production
+# - Run behind a reverse proxy (nginx, traefik, etc.) with HTTPS
+
+services:
+  # =============================================================================
+  # TimescaleDB - Primary Database
+  # =============================================================================
+  timescaledb-primary:
+    image: timescale/timescaledb:2.14.2-pg16
+    container_name: llm-observatory-db-primary
+    restart: always
+    # Security: Run as postgres user (UID 999)
+    user: postgres
+    ports:
+      # Only expose internally - use reverse proxy or VPN for external access
+      - "127.0.0.1:${DB_PORT:-5432}:5432"
+    environment:
+      POSTGRES_USER_FILE: /run/secrets/db_user
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+      POSTGRES_DB: ${DB_NAME:-llm_observatory}
+      TIMESCALEDB_TELEMETRY: "off"
+
+      # Production-optimized PostgreSQL settings
+      # Adjust based on your server specs (example: 16GB RAM server)
+      POSTGRES_SHARED_BUFFERS: ${DB_SHARED_BUFFERS:-4GB}
+      POSTGRES_WORK_MEM: ${DB_WORK_MEM:-64MB}
+      POSTGRES_MAINTENANCE_WORK_MEM: ${DB_MAINTENANCE_WORK_MEM:-512MB}
+      POSTGRES_EFFECTIVE_CACHE_SIZE: ${DB_EFFECTIVE_CACHE_SIZE:-12GB}
+      POSTGRES_MAX_WAL_SIZE: ${DB_MAX_WAL_SIZE:-4GB}
+      POSTGRES_MIN_WAL_SIZE: ${DB_MIN_WAL_SIZE:-1GB}
+
+      # Replication settings
+      POSTGRES_WAL_LEVEL: replica
+      POSTGRES_MAX_WAL_SENDERS: ${DB_MAX_WAL_SENDERS:-10}
+      POSTGRES_MAX_REPLICATION_SLOTS: ${DB_MAX_REPLICATION_SLOTS:-10}
+
+      # Security settings
+      POSTGRES_SSL_MODE: ${DB_SSL_MODE:-require}
+      POSTGRES_LOG_CONNECTIONS: "on"
+      POSTGRES_LOG_DISCONNECTIONS: "on"
+      POSTGRES_LOG_DURATION: "on"
+      POSTGRES_LOG_HOSTNAME: "on"
+
+    volumes:
+      # Persistent data with proper permissions
+      - timescaledb_data:/var/lib/postgresql/data:rw
+      # Initialization scripts (read-only)
+      - ./docker/init:/docker-entrypoint-initdb.d:ro
+      # SSL/TLS certificates (read-only)
+      - ./docker/certs/postgres:/var/lib/postgresql/certs:ro
+      # Configuration (read-only)
+      - ./docker/postgresql.prod.conf:/etc/postgresql/postgresql.conf:ro
+      # WAL archive for point-in-time recovery
+      - wal_archive:/var/lib/postgresql/wal_archive:rw
+
+    secrets:
+      - db_user
+      - db_password
+      - db_app_password
+      - db_readonly_password
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ${DB_NAME:-llm_observatory} || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+    networks:
+      - backend
+      - db-replication
+
+    # Resource limits (adjust based on your infrastructure)
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 8G
+        reservations:
+          cpus: '2.0'
+          memory: 4G
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+
+    command: >
+      postgres
+      -c config_file=/etc/postgresql/postgresql.conf
+      -c shared_preload_libraries=timescaledb
+      -c max_connections=400
+      -c superuser_reserved_connections=3
+      -c wal_level=replica
+      -c max_wal_senders=10
+      -c max_replication_slots=10
+      -c hot_standby=on
+      -c archive_mode=on
+      -c archive_command='test ! -f /var/lib/postgresql/wal_archive/%f && cp %p /var/lib/postgresql/wal_archive/%f'
+      -c ssl=on
+      -c ssl_cert_file=/var/lib/postgresql/certs/server.crt
+      -c ssl_key_file=/var/lib/postgresql/certs/server.key
+      -c ssl_ca_file=/var/lib/postgresql/certs/ca.crt
+      -c log_destination=stderr
+      -c logging_collector=on
+      -c log_directory=/var/lib/postgresql/data/log
+      -c log_filename=postgresql-%Y-%m-%d_%H%M%S.log
+      -c log_rotation_age=1d
+      -c log_rotation_size=100MB
+      -c log_min_duration_statement=100
+      -c log_checkpoints=on
+      -c log_connections=on
+      -c log_disconnections=on
+      -c log_lock_waits=on
+      -c log_statement=ddl
+      -c log_temp_files=0
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+        tag: "{{.Name}}/{{.ID}}"
+        labels: "production,database,primary"
+
+  # =============================================================================
+  # TimescaleDB - Read Replica (for scaling read operations)
+  # =============================================================================
+  timescaledb-replica:
+    image: timescale/timescaledb:2.14.2-pg16
+    container_name: llm-observatory-db-replica
+    restart: always
+    user: postgres
+    ports:
+      - "127.0.0.1:${DB_REPLICA_PORT:-5433}:5432"
+
+    environment:
+      POSTGRES_USER_FILE: /run/secrets/db_user
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+      POSTGRES_DB: ${DB_NAME:-llm_observatory}
+      TIMESCALEDB_TELEMETRY: "off"
+      PGHOST: timescaledb-primary
+      PGPORT: 5432
+
+      # Replica-specific settings
+      POSTGRES_HOT_STANDBY: "on"
+      POSTGRES_SHARED_BUFFERS: ${DB_REPLICA_SHARED_BUFFERS:-2GB}
+      POSTGRES_EFFECTIVE_CACHE_SIZE: ${DB_REPLICA_EFFECTIVE_CACHE_SIZE:-6GB}
+
+    volumes:
+      - timescaledb_replica_data:/var/lib/postgresql/data:rw
+      - ./docker/certs/postgres:/var/lib/postgresql/certs:ro
+      - ./docker/postgresql.replica.conf:/etc/postgresql/postgresql.conf:ro
+
+    secrets:
+      - db_user
+      - db_password
+      - db_replication_password
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+    networks:
+      - backend
+      - db-replication
+
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+        reservations:
+          cpus: '1.0'
+          memory: 2G
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+
+    depends_on:
+      timescaledb-primary:
+        condition: service_healthy
+
+    # Replica setup command
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -e
+
+        # Check if this is first time setup
+        if [ ! -f /var/lib/postgresql/data/PG_VERSION ]; then
+          echo "Initializing replica from primary..."
+
+          # Create .pgpass file for authentication
+          echo "timescaledb-primary:5432:*:postgres:$$(cat /run/secrets/db_password)" > ~/.pgpass
+          chmod 600 ~/.pgpass
+
+          # Base backup from primary
+          pg_basebackup -h timescaledb-primary -p 5432 -U postgres -D /var/lib/postgresql/data -Fp -Xs -P -R
+
+          # Configure recovery
+          touch /var/lib/postgresql/data/standby.signal
+
+          echo "Replica initialization complete"
+        fi
+
+        # Start PostgreSQL
+        exec postgres -c config_file=/etc/postgresql/postgresql.conf
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+        tag: "{{.Name}}/{{.ID}}"
+        labels: "production,database,replica"
+
+    profiles:
+      - with-replica
+
+  # =============================================================================
+  # Redis Sentinel - High Availability Redis Cluster
+  # =============================================================================
+  redis-master:
+    image: redis:7.2-alpine
+    container_name: llm-observatory-redis-master
+    restart: always
+    # Security: Run as redis user (UID 999)
+    user: redis
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+
+    environment:
+      REDIS_PASSWORD_FILE: /run/secrets/redis_password
+      REDIS_REPLICATION_MODE: master
+
+    volumes:
+      - redis_master_data:/data:rw
+      - ./docker/redis.prod.conf:/usr/local/etc/redis/redis.conf:ro
+      - ./docker/certs/redis:/tls:ro
+
+    secrets:
+      - redis_password
+
+    healthcheck:
+      test: ["CMD", "redis-cli", "--no-auth-warning", "-a", "$$(cat /run/secrets/redis_password)", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+    networks:
+      - backend
+      - redis-cluster
+
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+
+    command: >
+      sh -c '
+        REDIS_PASSWORD=$$(cat /run/secrets/redis_password)
+        redis-server /usr/local/etc/redis/redis.conf
+        --requirepass "$$REDIS_PASSWORD"
+        --masterauth "$$REDIS_PASSWORD"
+        --maxmemory 768mb
+        --maxmemory-policy allkeys-lru
+        --appendonly yes
+        --appendfsync everysec
+        --auto-aof-rewrite-percentage 100
+        --auto-aof-rewrite-min-size 64mb
+        --save 900 1
+        --save 300 10
+        --save 60 10000
+        --stop-writes-on-bgsave-error yes
+        --rdbcompression yes
+        --rdbchecksum yes
+        --tcp-backlog 511
+        --timeout 300
+        --tcp-keepalive 60
+        --loglevel notice
+        --slowlog-log-slower-than 10000
+        --slowlog-max-len 128
+        --latency-monitor-threshold 100
+        --tls-port 6380
+        --port 0
+        --tls-cert-file /tls/redis.crt
+        --tls-key-file /tls/redis.key
+        --tls-ca-cert-file /tls/ca.crt
+        --tls-auth-clients no
+      '
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+        tag: "{{.Name}}/{{.ID}}"
+        labels: "production,cache,redis-master"
+
+  # Redis Sentinel for automatic failover
+  redis-sentinel:
+    image: redis:7.2-alpine
+    container_name: llm-observatory-redis-sentinel
+    restart: always
+    user: redis
+    ports:
+      - "127.0.0.1:${REDIS_SENTINEL_PORT:-26379}:26379"
+
+    volumes:
+      - redis_sentinel_data:/data:rw
+      - ./docker/sentinel.conf:/usr/local/etc/redis/sentinel.conf:ro
+
+    secrets:
+      - redis_password
+
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "26379", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+    networks:
+      - redis-cluster
+
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+    depends_on:
+      redis-master:
+        condition: service_healthy
+
+    command: >
+      sh -c '
+        REDIS_PASSWORD=$$(cat /run/secrets/redis_password)
+        cat > /tmp/sentinel.conf <<EOF
+        port 26379
+        sentinel monitor mymaster redis-master 6379 2
+        sentinel auth-pass mymaster $$REDIS_PASSWORD
+        sentinel down-after-milliseconds mymaster 5000
+        sentinel parallel-syncs mymaster 1
+        sentinel failover-timeout mymaster 10000
+        sentinel deny-scripts-reconfig yes
+        EOF
+        redis-server /tmp/sentinel.conf --sentinel
+      '
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+        tag: "{{.Name}}/{{.ID}}"
+        labels: "production,cache,redis-sentinel"
+
+    profiles:
+      - with-ha
+
+  # =============================================================================
+  # Grafana - Visualization and Dashboards
+  # =============================================================================
+  grafana:
+    image: grafana/grafana:10.4.1
+    container_name: llm-observatory-grafana
+    restart: always
+    # Security: Run as grafana user (UID 472)
+    user: "472:472"
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
+
+    environment:
+      # Security
+      GF_SECURITY_ADMIN_USER__FILE: /run/secrets/grafana_admin_user
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_password
+      GF_SECURITY_SECRET_KEY__FILE: /run/secrets/grafana_secret_key
+      GF_SECURITY_DISABLE_GRAVATAR: "true"
+      GF_SECURITY_COOKIE_SECURE: "true"
+      GF_SECURITY_COOKIE_SAMESITE: "strict"
+      GF_SECURITY_STRICT_TRANSPORT_SECURITY: "true"
+      GF_SECURITY_CONTENT_SECURITY_POLICY: "true"
+
+      # Server settings
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL}
+      GF_SERVER_DOMAIN: ${GRAFANA_DOMAIN}
+      GF_SERVER_PROTOCOL: https
+      GF_SERVER_CERT_FILE: /etc/grafana/certs/grafana.crt
+      GF_SERVER_CERT_KEY: /etc/grafana/certs/grafana.key
+      GF_SERVER_ENFORCE_DOMAIN: "true"
+
+      # Database (using TimescaleDB)
+      GF_DATABASE_TYPE: postgres
+      GF_DATABASE_HOST: timescaledb-primary:5432
+      GF_DATABASE_NAME: ${GRAFANA_DB_NAME:-grafana}
+      GF_DATABASE_USER__FILE: /run/secrets/db_user
+      GF_DATABASE_PASSWORD__FILE: /run/secrets/db_password
+      GF_DATABASE_SSL_MODE: require
+      GF_DATABASE_MAX_OPEN_CONN: 20
+      GF_DATABASE_MAX_IDLE_CONN: 10
+
+      # Authentication
+      GF_AUTH_DISABLE_LOGIN_FORM: "false"
+      GF_AUTH_DISABLE_SIGNOUT_MENU: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_AUTH_BASIC_ENABLED: "true"
+      GF_AUTH_OAUTH_AUTO_LOGIN: "false"
+
+      # Session management
+      GF_SESSION_PROVIDER: redis
+      GF_SESSION_PROVIDER_CONFIG: addr=redis-master:6379,pool_size=100,db=0,password=__REDIS_PASSWORD__
+      GF_SESSION_COOKIE_SECURE: "true"
+      GF_SESSION_COOKIE_SAMESITE: "strict"
+
+      # Logging
+      GF_LOG_MODE: console
+      GF_LOG_LEVEL: info
+      GF_LOG_FILTERS: rendering:debug
+
+      # Telemetry
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+
+      # Plugins
+      GF_PLUGINS_ENABLE_ALPHA: "false"
+      GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS: ""
+
+      # Snapshots (disable external)
+      GF_SNAPSHOTS_EXTERNAL_ENABLED: "false"
+
+      # SMTP (for alerts)
+      GF_SMTP_ENABLED: ${SMTP_ENABLED:-false}
+      GF_SMTP_HOST: ${SMTP_HOST}
+      GF_SMTP_USER: ${SMTP_USER}
+      GF_SMTP_PASSWORD__FILE: /run/secrets/smtp_password
+      GF_SMTP_FROM_ADDRESS: ${SMTP_FROM_ADDRESS}
+      GF_SMTP_FROM_NAME: "LLM Observatory"
+
+    volumes:
+      - grafana_data:/var/lib/grafana:rw
+      - ./docker/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./docker/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./docker/grafana/alerting:/etc/grafana/provisioning/alerting:ro
+      - ./docker/certs/grafana:/etc/grafana/certs:ro
+
+    secrets:
+      - grafana_admin_user
+      - grafana_admin_password
+      - grafana_secret_key
+      - db_user
+      - db_password
+      - redis_password
+      - smtp_password
+
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider https://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+    networks:
+      - backend
+      - frontend
+
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+
+    depends_on:
+      timescaledb-primary:
+        condition: service_healthy
+      redis-master:
+        condition: service_healthy
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+        tag: "{{.Name}}/{{.ID}}"
+        labels: "production,visualization,grafana"
+
+    # Security: Read-only root filesystem
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777,size=100M
+      - /var/lib/grafana/plugins:mode=0755,size=100M
+
+    # Security: Drop all capabilities
+    cap_drop:
+      - ALL
+
+  # =============================================================================
+  # LLM Observatory API Server
+  # =============================================================================
+  api-server:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+      args:
+        RUST_VERSION: 1.75
+        BUILD_PROFILE: release
+      target: runtime
+    container_name: llm-observatory-api
+    restart: always
+    # Security: Run as non-root user
+    user: "1000:1000"
+    ports:
+      - "127.0.0.1:${API_PORT:-8080}:8080"
+
+    environment:
+      # Application
+      ENVIRONMENT: production
+      RUST_LOG: ${RUST_LOG:-info}
+      RUST_BACKTRACE: 0
+
+      # Server
+      APP_HOST: 0.0.0.0
+      APP_PORT: 8080
+      APP_WORKERS: ${APP_WORKERS:-4}
+
+      # Database
+      DATABASE_URL_FILE: /run/secrets/database_url
+      DATABASE_POOL_MIN_SIZE: ${DB_POOL_MIN_SIZE:-10}
+      DATABASE_POOL_MAX_SIZE: ${DB_POOL_MAX_SIZE:-50}
+      DATABASE_POOL_TIMEOUT: ${DB_POOL_TIMEOUT:-30}
+      DATABASE_CONNECT_TIMEOUT: ${DB_CONNECT_TIMEOUT:-10}
+      DATABASE_IDLE_TIMEOUT: ${DB_IDLE_TIMEOUT:-600}
+      DATABASE_MAX_LIFETIME: ${DB_MAX_LIFETIME:-1800}
+
+      # Redis
+      REDIS_URL_FILE: /run/secrets/redis_url
+      REDIS_POOL_SIZE: ${REDIS_POOL_SIZE:-100}
+      REDIS_TIMEOUT: ${REDIS_TIMEOUT:-5}
+
+      # Cache
+      CACHE_DEFAULT_TTL: ${CACHE_DEFAULT_TTL:-3600}
+      CACHE_SHORT_TTL: ${CACHE_SHORT_TTL:-300}
+      CACHE_LONG_TTL: ${CACHE_LONG_TTL:-86400}
+
+      # Security
+      SECRET_KEY_FILE: /run/secrets/secret_key
+      JWT_SECRET_FILE: /run/secrets/jwt_secret
+      JWT_ALGORITHM: HS256
+      JWT_EXPIRATION: ${JWT_EXPIRATION:-3600}
+
+      # CORS
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      CORS_MAX_AGE: 3600
+
+      # Rate limiting
+      RATE_LIMIT_ENABLED: "true"
+      RATE_LIMIT_REQUESTS: ${RATE_LIMIT_REQUESTS:-100}
+      RATE_LIMIT_WINDOW: ${RATE_LIMIT_WINDOW:-60}
+      RATE_LIMIT_STORAGE: redis
+
+      # TLS
+      TLS_ENABLED: "true"
+      TLS_CERT_FILE: /etc/api/certs/server.crt
+      TLS_KEY_FILE: /etc/api/certs/server.key
+      TLS_CA_FILE: /etc/api/certs/ca.crt
+
+      # Observability
+      METRICS_ENABLED: "true"
+      METRICS_PORT: 9090
+      HEALTH_CHECK_ENABLED: "true"
+      TRACING_ENABLED: "true"
+      TRACING_ENDPOINT: ${TRACING_ENDPOINT}
+
+      # Logging
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      LOG_FORMAT: json
+      LOG_STRUCTURED: "true"
+
+    volumes:
+      - ./docker/certs/api:/etc/api/certs:ro
+      # Configuration files (read-only)
+      - ./config/production.toml:/etc/llm-observatory/config.toml:ro
+
+    secrets:
+      - database_url
+      - redis_url
+      - secret_key
+      - jwt_secret
+
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+    networks:
+      - backend
+      - frontend
+
+    deploy:
+      replicas: ${API_REPLICAS:-2}
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '1.0'
+          memory: 1G
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+        order: start-first
+
+    depends_on:
+      timescaledb-primary:
+        condition: service_healthy
+      redis-master:
+        condition: service_healthy
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+        tag: "{{.Name}}/{{.ID}}"
+        labels: "production,api,backend"
+
+    # Security: Read-only root filesystem
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777,size=100M
+
+    # Security: Drop all capabilities
+    cap_drop:
+      - ALL
+
+    # Security: No new privileges
+    security_opt:
+      - no-new-privileges:true
+
+  # =============================================================================
+  # LLM Observatory Collector Service
+  # =============================================================================
+  collector:
+    build:
+      context: .
+      dockerfile: docker/collector.Dockerfile
+      args:
+        RUST_VERSION: 1.75
+        BUILD_PROFILE: release
+      target: runtime
+    container_name: llm-observatory-collector
+    restart: always
+    user: "1000:1000"
+
+    environment:
+      ENVIRONMENT: production
+      RUST_LOG: ${RUST_LOG:-info}
+      DATABASE_URL_FILE: /run/secrets/database_url
+      REDIS_URL_FILE: /run/secrets/redis_url
+      SECRET_KEY_FILE: /run/secrets/secret_key
+
+      # Collector specific settings
+      COLLECTOR_WORKERS: ${COLLECTOR_WORKERS:-4}
+      COLLECTOR_BATCH_SIZE: ${COLLECTOR_BATCH_SIZE:-1000}
+      COLLECTOR_FLUSH_INTERVAL: ${COLLECTOR_FLUSH_INTERVAL:-10}
+      COLLECTOR_QUEUE_SIZE: ${COLLECTOR_QUEUE_SIZE:-10000}
+
+      # OpenTelemetry
+      OTLP_ENDPOINT: 0.0.0.0:4317
+      OTLP_HTTP_ENDPOINT: 0.0.0.0:4318
+
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      LOG_FORMAT: json
+
+    ports:
+      - "127.0.0.1:${OTLP_GRPC_PORT:-4317}:4317"
+      - "127.0.0.1:${OTLP_HTTP_PORT:-4318}:4318"
+
+    volumes:
+      - ./config/production.toml:/etc/llm-observatory/config.toml:ro
+
+    secrets:
+      - database_url
+      - redis_url
+      - secret_key
+
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:13133"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+    networks:
+      - backend
+
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '1.0'
+          memory: 1G
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+
+    depends_on:
+      timescaledb-primary:
+        condition: service_healthy
+      redis-master:
+        condition: service_healthy
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+        tag: "{{.Name}}/{{.ID}}"
+        labels: "production,collector,backend"
+
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777,size=100M
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  # =============================================================================
+  # Nginx - Reverse Proxy and Load Balancer
+  # =============================================================================
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: llm-observatory-nginx
+    restart: always
+    user: nginx
+    ports:
+      - "${HTTPS_PORT:-443}:443"
+      - "${HTTP_PORT:-80}:80"
+
+    volumes:
+      - ./docker/nginx/nginx.prod.conf:/etc/nginx/nginx.conf:ro
+      - ./docker/nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./docker/certs/nginx:/etc/nginx/certs:ro
+      - ./docker/nginx/ssl-params.conf:/etc/nginx/ssl-params.conf:ro
+      - nginx_cache:/var/cache/nginx:rw
+      - nginx_logs:/var/log/nginx:rw
+
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+    networks:
+      - frontend
+
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+      restart_policy:
+        condition: on-failure
+
+    depends_on:
+      - api-server
+      - grafana
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+        tag: "{{.Name}}/{{.ID}}"
+        labels: "production,proxy,nginx"
+
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+
+  # =============================================================================
+  # Automated Backup Service
+  # =============================================================================
+  backup:
+    build:
+      context: ./docker/backup
+      dockerfile: Dockerfile
+    container_name: llm-observatory-backup
+    restart: "no"  # Run via cron or manually
+    user: "1000:1000"
+
+    environment:
+      PGHOST: timescaledb-primary
+      PGPORT: 5432
+      PGDATABASE: ${DB_NAME:-llm_observatory}
+      PGUSER_FILE: /run/secrets/db_user
+      PGPASSWORD_FILE: /run/secrets/db_password
+
+      # Backup configuration
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION:-30}
+      BACKUP_COMPRESSION: "true"
+      BACKUP_ENCRYPTION: "true"
+      BACKUP_ENCRYPTION_KEY_FILE: /run/secrets/backup_encryption_key
+
+      # S3 configuration
+      AWS_ACCESS_KEY_ID_FILE: /run/secrets/aws_access_key_id
+      AWS_SECRET_ACCESS_KEY_FILE: /run/secrets/aws_secret_access_key
+      AWS_REGION: ${AWS_REGION}
+      S3_BACKUP_BUCKET: ${S3_BACKUP_BUCKET}
+      S3_BACKUP_PREFIX: ${S3_BACKUP_PREFIX:-backups/}
+      S3_STORAGE_CLASS: ${S3_STORAGE_CLASS:-STANDARD_IA}
+      S3_KMS_KEY_ID: ${S3_KMS_KEY_ID}
+
+      # Notification
+      NOTIFICATION_EMAIL: ${NOTIFICATION_EMAIL}
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASSWORD_FILE: /run/secrets/smtp_password
+
+    volumes:
+      - backup_data:/backups:rw
+      - ./scripts:/scripts:ro
+
+    secrets:
+      - db_user
+      - db_password
+      - backup_encryption_key
+      - aws_access_key_id
+      - aws_secret_access_key
+      - smtp_password
+
+    networks:
+      - backend
+
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+    depends_on:
+      timescaledb-primary:
+        condition: service_healthy
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+        tag: "{{.Name}}/{{.ID}}"
+        labels: "production,backup"
+
+    profiles:
+      - backup
+
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777,size=500M
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+# =============================================================================
+# Docker Secrets (for development/testing)
+# In production, use external secret management (AWS Secrets Manager, Vault, etc.)
+# =============================================================================
+secrets:
+  db_user:
+    file: ./secrets/db_user.txt
+  db_password:
+    file: ./secrets/db_password.txt
+  db_app_password:
+    file: ./secrets/db_app_password.txt
+  db_readonly_password:
+    file: ./secrets/db_readonly_password.txt
+  db_replication_password:
+    file: ./secrets/db_replication_password.txt
+  redis_password:
+    file: ./secrets/redis_password.txt
+  grafana_admin_user:
+    file: ./secrets/grafana_admin_user.txt
+  grafana_admin_password:
+    file: ./secrets/grafana_admin_password.txt
+  grafana_secret_key:
+    file: ./secrets/grafana_secret_key.txt
+  database_url:
+    file: ./secrets/database_url.txt
+  redis_url:
+    file: ./secrets/redis_url.txt
+  secret_key:
+    file: ./secrets/secret_key.txt
+  jwt_secret:
+    file: ./secrets/jwt_secret.txt
+  smtp_password:
+    file: ./secrets/smtp_password.txt
+  backup_encryption_key:
+    file: ./secrets/backup_encryption_key.txt
+  aws_access_key_id:
+    file: ./secrets/aws_access_key_id.txt
+  aws_secret_access_key:
+    file: ./secrets/aws_secret_access_key.txt
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  # Frontend network (public-facing services)
+  frontend:
+    driver: bridge
+    name: llm-observatory-frontend
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24
+    driver_opts:
+      com.docker.network.bridge.name: llm-obs-frontend
+
+  # Backend network (internal services)
+  backend:
+    driver: bridge
+    name: llm-observatory-backend
+    internal: true  # No external access
+    ipam:
+      config:
+        - subnet: 172.21.0.0/24
+    driver_opts:
+      com.docker.network.bridge.name: llm-obs-backend
+
+  # Database replication network
+  db-replication:
+    driver: bridge
+    name: llm-observatory-db-repl
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.22.0.0/24
+
+  # Redis cluster network
+  redis-cluster:
+    driver: bridge
+    name: llm-observatory-redis-cluster
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.23.0.0/24
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  # Database volumes
+  timescaledb_data:
+    name: llm-observatory-db-primary-data
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DATA_DIR:-/var/lib/llm-observatory}/timescaledb-primary
+
+  timescaledb_replica_data:
+    name: llm-observatory-db-replica-data
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DATA_DIR:-/var/lib/llm-observatory}/timescaledb-replica
+
+  wal_archive:
+    name: llm-observatory-wal-archive
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DATA_DIR:-/var/lib/llm-observatory}/wal_archive
+
+  # Redis volumes
+  redis_master_data:
+    name: llm-observatory-redis-master-data
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DATA_DIR:-/var/lib/llm-observatory}/redis-master
+
+  redis_sentinel_data:
+    name: llm-observatory-redis-sentinel-data
+    driver: local
+
+  # Grafana volume
+  grafana_data:
+    name: llm-observatory-grafana-data
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DATA_DIR:-/var/lib/llm-observatory}/grafana
+
+  # Nginx volumes
+  nginx_cache:
+    name: llm-observatory-nginx-cache
+    driver: local
+
+  nginx_logs:
+    name: llm-observatory-nginx-logs
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DATA_DIR:-/var/lib/llm-observatory}/nginx-logs
+
+  # Backup volume
+  backup_data:
+    name: llm-observatory-backup-data
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DATA_DIR:-/var/lib/llm-observatory}/backups

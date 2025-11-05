@@ -1,0 +1,89 @@
+# Qdrant Configuration for AI Customer Support Platform
+
+service:
+  # HTTP configuration
+  http_port: 6333
+
+  # gRPC configuration
+  grpc_port: 6334
+
+  # Enable CORS
+  enable_cors: true
+
+  # Max request size (in bytes) - 100MB
+  max_request_size_mb: 100
+
+storage:
+  # Storage path
+  storage_path: /qdrant/storage
+
+  # Performance mode (mmap for better performance with SSD)
+  on_disk_payload: true
+
+  # Write-ahead log
+  wal:
+    wal_capacity_mb: 32
+    wal_segments_ahead: 2
+
+# Optimizer configuration
+optimizer:
+  # The number of deleted vectors threshold to trigger optimization
+  deleted_threshold: 0.2
+
+  # Vacuum interval in seconds
+  vacuum_min_vector_number: 1000
+
+  # Default segment number
+  default_segment_number: 2
+
+  # Max segment size in KB
+  max_segment_size_kb: 200000
+
+  # Memmap threshold in KB
+  memmap_threshold_kb: 50000
+
+  # Indexing threshold
+  indexing_threshold_kb: 20000
+
+  # Flush interval in seconds
+  flush_interval_sec: 5
+
+# Collection defaults
+collection:
+  # Default vector size
+  default_vector_size: 1536
+
+  # Default distance metric (Cosine, Euclid, or Dot)
+  default_distance: Cosine
+
+  # HNSW index parameters
+  hnsw_config:
+    # Number of edges per node in the graph
+    m: 16
+
+    # Size of the dynamic candidate list for construction
+    ef_construct: 100
+
+    # Minimal number of vectors for HNSW index
+    full_scan_threshold: 10000
+
+  # Quantization config (optional, for memory optimization)
+  # quantization_config:
+  #   scalar:
+  #     type: int8
+  #     quantile: 0.99
+  #     always_ram: true
+
+# Logging
+log_level: INFO
+
+# Telemetry (disable for privacy)
+telemetry_disabled: true
+
+# Cluster configuration (for scaling)
+# cluster:
+#   enabled: false
+#   p2p:
+#     port: 6335
+#   consensus:
+#     tick_period_ms: 100

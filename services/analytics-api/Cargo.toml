@@ -1,0 +1,61 @@
+[package]
+name = "analytics-api"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75.0"
+authors = ["LLM Observatory Contributors"]
+license = "Apache-2.0"
+description = "Analytics API service for LLM Observatory"
+
+[dependencies]
+# Async runtime
+tokio = { workspace = true }
+async-trait = { workspace = true }
+futures = { workspace = true }
+
+# HTTP/Web framework
+axum = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+hyper = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Database
+sqlx = { workspace = true }
+redis = { workspace = true }
+
+# Observability
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+metrics = { workspace = true }
+metrics-exporter-prometheus = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+
+# Utilities
+uuid = { workspace = true }
+chrono = { workspace = true }
+once_cell = { workspace = true }
+dashmap = { workspace = true }
+
+# Configuration
+config = { workspace = true }
+dotenvy = { workspace = true }
+
+[dev-dependencies]
+mockall = { workspace = true }
+tokio-test = "0.4"
+tower = { workspace = true, features = ["util"] }
+
+[lib]
+name = "analytics_api"
+path = "src/lib.rs"
+
+[[bin]]
+name = "analytics-api"
+path = "src/main.rs"

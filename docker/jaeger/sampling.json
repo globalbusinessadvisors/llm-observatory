@@ -1,0 +1,54 @@
+{
+  "service_strategies": [
+    {
+      "service": "llm-observatory-collector",
+      "type": "probabilistic",
+      "param": 1.0,
+      "operation_strategies": [
+        {
+          "operation": "otlp.receive",
+          "type": "probabilistic",
+          "param": 1.0
+        }
+      ]
+    },
+    {
+      "service": "llm-observatory-storage",
+      "type": "probabilistic",
+      "param": 0.1,
+      "operation_strategies": [
+        {
+          "operation": "write_span",
+          "type": "probabilistic",
+          "param": 0.01
+        },
+        {
+          "operation": "query_traces",
+          "type": "probabilistic",
+          "param": 1.0
+        }
+      ]
+    },
+    {
+      "service": "llm-observatory-api",
+      "type": "probabilistic",
+      "param": 0.1,
+      "operation_strategies": [
+        {
+          "operation": "graphql_query",
+          "type": "probabilistic",
+          "param": 0.5
+        },
+        {
+          "operation": "rest_api",
+          "type": "probabilistic",
+          "param": 0.1
+        }
+      ]
+    }
+  ],
+  "default_strategy": {
+    "type": "probabilistic",
+    "param": 0.001
+  }
+}

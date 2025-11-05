@@ -1,0 +1,579 @@
+# Prometheus Alert Rules for LLM Observatory Storage Layer
+#
+# This file contains alerting rules for the storage layer including:
+# - Database availability and performance
+# - Connection pool exhaustion
+# - Query performance degradation
+# - Error rate monitoring
+# - Resource utilization
+#
+# To use these rules:
+# 1. Copy this file to your Prometheus configuration directory
+# 2. Add to prometheus.yml:
+#    rule_files:
+#      - "storage_layer_alerts.yml"
+# 3. Reload Prometheus configuration
+#
+# Alert Severity Levels:
+# - critical: Immediate action required (page on-call)
+# - warning: Investigation needed (notify team channel)
+# - info: Informational only (log/ticket)
+
+groups:
+  ##############################################################################
+  # Database Availability Alerts
+  ##############################################################################
+  - name: storage_database_availability
+    interval: 30s
+    rules:
+      - alert: DatabaseDown
+        expr: up{job="timescaledb"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: database
+          layer: storage
+        annotations:
+          summary: "TimescaleDB is down"
+          description: "TimescaleDB instance {{ $labels.instance }} has been down for more than 1 minute."
+          runbook_url: "https://docs.llm-observatory.io/runbooks/database-down"
+          dashboard: "https://grafana.llm-observatory.io/d/storage-overview"
+
+      - alert: DatabaseConnectionFailure
+        expr: |
+          rate(pg_stat_database_xact_rollback{datname="llm_observatory"}[5m])
+          / rate(pg_stat_database_xact_commit{datname="llm_observatory"}[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          component: database
+          layer: storage
+        annotations:
+          summary: "High database transaction rollback rate"
+          description: "Database {{ $labels.datname }} has {{ $value | humanizePercentage }} transaction rollback rate."
+          runbook_url: "https://docs.llm-observatory.io/runbooks/high-rollback-rate"
+
+      - alert: DatabaseReadOnly
+        expr: pg_settings_read_only{} == 1
+        for: 2m
+        labels:
+          severity: critical
+          component: database
+          layer: storage
+        annotations:
+          summary: "Database is in read-only mode"
+          description: "Database {{ $labels.instance }} is in read-only mode. Write operations will fail."
+          runbook_url: "https://docs.llm-observatory.io/runbooks/database-readonly"
+
+  ##############################################################################
+  # Connection Pool Alerts
+  ##############################################################################
+  - name: storage_connection_pool
+    interval: 30s
+    rules:
+      - alert: ConnectionPoolExhausted
+        expr: |
+          (pg_stat_database_numbackends{datname="llm_observatory"}
+          / on(instance) pg_settings_max_connections) > 0.9
+        for: 5m
+        labels:
+          severity: critical
+          component: connection-pool
+          layer: storage
+        annotations:
+          summary: "Database connection pool near exhaustion"
+          description: "Database {{ $labels.datname }} is using {{ $value | humanizePercentage }} of available connections."
+          runbook_url: "https://docs.llm-observatory.io/runbooks/connection-pool-exhausted"
+          action: "Consider increasing max_connections or investigating connection leaks"
+
+      - alert: ConnectionPoolHighUsage
+        expr: |
+          (pg_stat_database_numbackends{datname="llm_observatory"}
+          / on(instance) pg_settings_max_connections) > 0.75
+        for: 10m
+        labels:
+          severity: warning
+          component: connection-pool
+          layer: storage
+        annotations:
+          summary: "Database connection pool high usage"
+          description: "Database {{ $labels.datname }} is using {{ $value | humanizePercentage }} of available connections."
+          runbook_url: "https://docs.llm-observatory.io/runbooks/connection-pool-high"
+
+      - alert: IdleConnectionsHigh
+        expr: |
+          sum(pg_stat_activity_count{state="idle"}) by (instance, datname) > 20
+        for: 15m
+        labels:
+          severity: warning
+          component: connection-pool
+          layer: storage
+        annotations:
+          summary: "High number of idle database connections"
+          description: "Database {{ $labels.datname }} has {{ $value }} idle connections for more than 15 minutes."
+          runbook_url: "https://docs.llm-observatory.io/runbooks/idle-connections"
+          action: "Check for connection leaks in application code"
+
+      - alert: LongRunningConnections
+        expr: |
+          count(pg_stat_activity_max_tx_duration{datname="llm_observatory"} > 300) by (instance) > 5
+        for: 5m
+        labels:
+          severity: warning
+          component: database
+          layer: storage
+        annotations:
+          summary: "Multiple long-running database connections detected"
+          description: "Database {{ $labels.instance }} has {{ $value }} connections running for more than 5 minutes."
+          runbook_url: "https://docs.llm-observatory.io/runbooks/long-running-queries"
+
+  ##############################################################################
+  # Query Performance Alerts
+  ##############################################################################
+  - name: storage_query_performance
+    interval: 1m
+    rules:
+      - alert: SlowQueryDetected
+        expr: |
+          histogram_quantile(0.95,
+            rate(pg_stat_statements_total_time_bucket[5m])
+          ) > 5000
+        for: 10m
+        labels:
+          severity: warning
+          component: database
+          layer: storage
+        annotations:
+          summary: "Slow database queries detected"
+          description: "P95 query duration is {{ $value | humanizeDuration }} on {{ $labels.instance }}."
+          runbook_url: "https://docs.llm-observatory.io/runbooks/slow-queries"
+          action: "Review slow query log and consider adding indexes"
+
+      - alert: QueryPerformanceDegraded
+        expr: |
+          (
+            histogram_quantile(0.95, rate(pg_stat_statements_total_time_bucket[5m]))
+            /
+            histogram_quantile(0.95, rate(pg_stat_statements_total_time_bucket[5m] offset 1h))
+          ) > 2
+        for: 15m
+        labels:
+          severity: warning
+          component: database
+          layer: storage
+        annotations:
+          summary: "Query performance degraded compared to 1 hour ago"
+          description: "P95 query duration is {{ $value }}x slower than 1 hour ago on {{ $labels.instance }}."
+          runbook_url: "https://docs.llm-observatory.io/runbooks/performance-degradation"
+
+      - alert: HighQueryRate
+        expr: |
+          rate(pg_stat_database_xact_commit{datname="llm_observatory"}[5m]) > 10000
+        for: 10m
+        labels:
+          severity: info
+          component: database
+          layer: storage
+        annotations:
+          summary: "High query rate detected"
+          description: "Database {{ $labels.datname }} is processing {{ $value | humanize }} queries/sec."
+          runbook_url: "https://docs.llm-observatory.io/runbooks/high-query-rate"
+
+  ##############################################################################
+  # Application Performance Alerts
+  ##############################################################################
+  - name: storage_application_performance
+    interval: 30s
+    rules:
+      - alert: HighErrorRate
+        expr: |
+          sum(rate(http_requests_total{job="storage-layer",status=~"5.."}[5m])) by (instance)
+          /
+          sum(rate(http_requests_total{job="storage-layer"}[5m])) by (instance)
+          > 0.01
+        for: 5m
+        labels:
+          severity: critical
+          component: application
+          layer: storage
+        annotations:
+          summary: "High error rate in storage layer"
+          description: "Instance {{ $labels.instance }} has {{ $value | humanizePercentage }} error rate."
+          runbook_url: "https://docs.llm-observatory.io/runbooks/high-error-rate"
+
+      - alert: ErrorRateIncreased
+        expr: |
+          sum(rate(http_requests_total{job="storage-layer",status=~"5.."}[5m])) by (instance)
+          /
+          sum(rate(http_requests_total{job="storage-layer"}[5m])) by (instance)
+          > 0.005
+        for: 10m
+        labels:
+          severity: warning
+          component: application
+          layer: storage
+        annotations:
+          summary: "Elevated error rate in storage layer"
+          description: "Instance {{ $labels.instance }} has {{ $value | humanizePercentage }} error rate."
+          runbook_url: "https://docs.llm-observatory.io/runbooks/elevated-error-rate"
+
+      - alert: HighLatency
+        expr: |
+          histogram_quantile(0.95,
+            rate(http_request_duration_seconds_bucket{job="storage-layer"}[5m])
+          ) > 1.0
+        for: 10m
+        labels:
+          severity: warning
+          component: application
+          layer: storage
+        annotations:
+          summary: "High request latency in storage layer"
+          description: "P95 latency is {{ $value }}s on {{ $labels.instance }}."
+          runbook_url: "https://docs.llm-observatory.io/runbooks/high-latency"
+
+      - alert: LatencySpike
+        expr: |
+          (
+            histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job="storage-layer"}[5m]))
+            /
+            histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job="storage-layer"}[5m] offset 15m))
+          ) > 2
+        for: 5m
+        labels:
+          severity: warning
+          component: application
+          layer: storage
+        annotations:
+          summary: "Latency spike detected in storage layer"
+          description: "P95 latency is {{ $value }}x higher than 15 minutes ago on {{ $labels.instance }}."
+          runbook_url: "https://docs.llm-observatory.io/runbooks/latency-spike"
+
+      - alert: StorageServiceDown
+        expr: up{job="storage-layer"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: application
+          layer: storage
+        annotations:
+          summary: "Storage layer service is down"
+          description: "Storage service instance {{ $labels.instance }} has been down for more than 2 minutes."
+          runbook_url: "https://docs.llm-observatory.io/runbooks/service-down"
+
+  ##############################################################################
+  # Database Resource Alerts
+  ##############################################################################
+  - name: storage_database_resources
+    interval: 1m
+    rules:
+      - alert: DatabaseDiskSpaceLow
+        expr: |
+          (node_filesystem_avail_bytes{mountpoint="/var/lib/postgresql"}
+          / node_filesystem_size_bytes{mountpoint="/var/lib/postgresql"}) < 0.15
+        for: 10m
+        labels:
+          severity: critical
+          component: database
+          layer: storage
+        annotations:
+          summary: "Database disk space critically low"
+          description: "Database disk {{ $labels.device }} has only {{ $value | humanizePercentage }} space remaining."
+          runbook_url: "https://docs.llm-observatory.io/runbooks/low-disk-space"
+          action: "Free up space or expand disk immediately"
+
+      - alert: DatabaseDiskSpaceWarning
+        expr: |
+          (node_filesystem_avail_bytes{mountpoint="/var/lib/postgresql"}
+          / node_filesystem_size_bytes{mountpoint="/var/lib/postgresql"}) < 0.30
+        for: 10m
+        labels:
+          severity: warning
+          component: database
+          layer: storage
+        annotations:
+          summary: "Database disk space low"
+          description: "Database disk {{ $labels.device }} has only {{ $value | humanizePercentage }} space remaining."
+          runbook_url: "https://docs.llm-observatory.io/runbooks/low-disk-space"
+
+      - alert: DatabaseHighCPU
+        expr: |
+          rate(process_cpu_seconds_total{job="timescaledb"}[5m]) > 0.8
+        for: 10m
+        labels:
+          severity: warning
+          component: database
+          layer: storage
+        annotations:
+          summary: "Database CPU usage high"
+          description: "Database {{ $labels.instance }} CPU usage is {{ $value | humanizePercentage }}."
+          runbook_url: "https://docs.llm-observatory.io/runbooks/high-cpu"
+
+      - alert: DatabaseMemoryPressure
+        expr: |
+          (1 - (node_memory_MemAvailable_bytes{job="timescaledb"}
+          / node_memory_MemTotal_bytes{job="timescaledb"})) > 0.9
+        for: 10m
+        labels:
+          severity: warning
+          component: database
+          layer: storage
+        annotations:
+          summary: "Database memory pressure"
+          description: "Database {{ $labels.instance }} memory usage is {{ $value | humanizePercentage }}."
+          runbook_url: "https://docs.llm-observatory.io/runbooks/memory-pressure"
+
+      - alert: DatabaseIOWaitHigh
+        expr: |
+          rate(node_disk_io_time_seconds_total{job="timescaledb"}[5m]) > 0.8
+        for: 10m
+        labels:
+          severity: warning
+          component: database
+          layer: storage
+        annotations:
+          summary: "Database high I/O wait time"
+          description: "Database {{ $labels.instance }} I/O wait is {{ $value | humanizePercentage }}."
+          runbook_url: "https://docs.llm-observatory.io/runbooks/high-io-wait"
+
+  ##############################################################################
+  # Cache Performance Alerts (Redis)
+  ##############################################################################
+  - name: storage_cache_performance
+    interval: 1m
+    rules:
+      - alert: RedisDown
+        expr: up{job="redis"} == 0
+        for: 2m
+        labels:
+          severity: warning
+          component: cache
+          layer: storage
+        annotations:
+          summary: "Redis is down"
+          description: "Redis instance {{ $labels.instance }} has been down for more than 2 minutes."
+          runbook_url: "https://docs.llm-observatory.io/runbooks/redis-down"
+
+      - alert: RedisMemoryUsageHigh
+        expr: |
+          (redis_memory_used_bytes / redis_memory_max_bytes) > 0.9
+        for: 10m
+        labels:
+          severity: warning
+          component: cache
+          layer: storage
+        annotations:
+          summary: "Redis memory usage high"
+          description: "Redis {{ $labels.instance }} is using {{ $value | humanizePercentage }} of max memory."
+          runbook_url: "https://docs.llm-observatory.io/runbooks/redis-memory-high"
+
+      - alert: RedisCacheHitRateLow
+        expr: |
+          rate(redis_keyspace_hits_total[5m])
+          / (rate(redis_keyspace_hits_total[5m]) + rate(redis_keyspace_misses_total[5m]))
+          < 0.8
+        for: 15m
+        labels:
+          severity: info
+          component: cache
+          layer: storage
+        annotations:
+          summary: "Redis cache hit rate low"
+          description: "Redis {{ $labels.instance }} cache hit rate is {{ $value | humanizePercentage }}."
+          runbook_url: "https://docs.llm-observatory.io/runbooks/low-cache-hit-rate"
+
+  ##############################################################################
+  # Data Integrity Alerts
+  ##############################################################################
+  - name: storage_data_integrity
+    interval: 5m
+    rules:
+      - alert: ReplicationLagHigh
+        expr: |
+          pg_replication_lag_seconds > 300
+        for: 5m
+        labels:
+          severity: warning
+          component: database
+          layer: storage
+        annotations:
+          summary: "Database replication lag high"
+          description: "Replication lag is {{ $value | humanizeDuration }} on {{ $labels.instance }}."
+          runbook_url: "https://docs.llm-observatory.io/runbooks/replication-lag"
+
+      - alert: DatabaseLockWait
+        expr: |
+          pg_stat_activity_count{state="waiting"} > 10
+        for: 5m
+        labels:
+          severity: warning
+          component: database
+          layer: storage
+        annotations:
+          summary: "High number of database lock waits"
+          description: "Database has {{ $value }} queries waiting on locks."
+          runbook_url: "https://docs.llm-observatory.io/runbooks/lock-contention"
+
+      - alert: DeadlocksDetected
+        expr: |
+          rate(pg_stat_database_deadlocks{datname="llm_observatory"}[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          component: database
+          layer: storage
+        annotations:
+          summary: "Database deadlocks detected"
+          description: "Database {{ $labels.datname }} has {{ $value }} deadlocks/sec."
+          runbook_url: "https://docs.llm-observatory.io/runbooks/deadlocks"
+
+  ##############################################################################
+  # TimescaleDB Specific Alerts
+  ##############################################################################
+  - name: storage_timescaledb
+    interval: 5m
+    rules:
+      - alert: HypertableCompressionFailing
+        expr: |
+          rate(timescaledb_compression_errors_total[10m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          component: database
+          layer: storage
+        annotations:
+          summary: "TimescaleDB compression failures detected"
+          description: "Hypertable compression is failing at {{ $value }} errors/sec."
+          runbook_url: "https://docs.llm-observatory.io/runbooks/compression-failure"
+
+      - alert: ContinuousAggregateOutdated
+        expr: |
+          (time() - timescaledb_continuous_aggregate_refresh_timestamp) > 7200
+        for: 30m
+        labels:
+          severity: warning
+          component: database
+          layer: storage
+        annotations:
+          summary: "Continuous aggregate not refreshed recently"
+          description: "Continuous aggregate {{ $labels.view_name }} last refreshed {{ $value | humanizeDuration }} ago."
+          runbook_url: "https://docs.llm-observatory.io/runbooks/cagg-outdated"
+
+      - alert: RetentionPolicyNotRunning
+        expr: |
+          (time() - timescaledb_retention_job_last_run_timestamp) > 86400
+        for: 1h
+        labels:
+          severity: warning
+          component: database
+          layer: storage
+        annotations:
+          summary: "Retention policy has not run recently"
+          description: "Retention policy for {{ $labels.hypertable }} last ran {{ $value | humanizeDuration }} ago."
+          runbook_url: "https://docs.llm-observatory.io/runbooks/retention-policy-stale"
+
+  ##############################################################################
+  # Backup and Recovery Alerts
+  ##############################################################################
+  - name: storage_backup_recovery
+    interval: 1h
+    rules:
+      - alert: BackupFailed
+        expr: |
+          time() - last_backup_timestamp{job="backup"} > 86400
+        for: 1h
+        labels:
+          severity: critical
+          component: backup
+          layer: storage
+        annotations:
+          summary: "Database backup failed or not running"
+          description: "Last successful backup was {{ $value | humanizeDuration }} ago."
+          runbook_url: "https://docs.llm-observatory.io/runbooks/backup-failed"
+          action: "Investigate backup job immediately"
+
+      - alert: BackupOld
+        expr: |
+          time() - last_backup_timestamp{job="backup"} > 172800
+        for: 1h
+        labels:
+          severity: critical
+          component: backup
+          layer: storage
+        annotations:
+          summary: "Database backup very old"
+          description: "Last successful backup was {{ $value | humanizeDuration }} ago."
+          runbook_url: "https://docs.llm-observatory.io/runbooks/backup-old"
+
+  ##############################################################################
+  # Capacity Planning Alerts
+  ##############################################################################
+  - name: storage_capacity_planning
+    interval: 1h
+    rules:
+      - alert: DatabaseGrowthHigh
+        expr: |
+          (
+            (pg_database_size_bytes{datname="llm_observatory"}
+            - pg_database_size_bytes{datname="llm_observatory"} offset 24h)
+            / pg_database_size_bytes{datname="llm_observatory"} offset 24h
+          ) > 0.2
+        for: 2h
+        labels:
+          severity: info
+          component: database
+          layer: storage
+        annotations:
+          summary: "High database growth rate"
+          description: "Database has grown {{ $value | humanizePercentage }} in the last 24 hours."
+          runbook_url: "https://docs.llm-observatory.io/runbooks/high-growth"
+          action: "Review capacity planning and retention policies"
+
+      - alert: TableBloatHigh
+        expr: |
+          pg_table_bloat_ratio > 0.3
+        for: 1h
+        labels:
+          severity: warning
+          component: database
+          layer: storage
+        annotations:
+          summary: "High table bloat detected"
+          description: "Table {{ $labels.table }} has {{ $value | humanizePercentage }} bloat."
+          runbook_url: "https://docs.llm-observatory.io/runbooks/table-bloat"
+          action: "Consider running VACUUM FULL during maintenance window"
+
+  ##############################################################################
+  # Security and Compliance Alerts
+  ##############################################################################
+  - name: storage_security
+    interval: 5m
+    rules:
+      - alert: UnauthorizedAccessAttempt
+        expr: |
+          rate(pg_stat_database_xact_rollback{datname="llm_observatory"}[5m]) > 10
+          and
+          rate(pg_stat_database_xact_commit{datname="llm_observatory"}[5m]) == 0
+        for: 5m
+        labels:
+          severity: warning
+          component: security
+          layer: storage
+        annotations:
+          summary: "Potential unauthorized access attempts"
+          description: "High rollback rate with no commits may indicate access issues."
+          runbook_url: "https://docs.llm-observatory.io/runbooks/unauthorized-access"
+
+      - alert: UnusualQueryPattern
+        expr: |
+          rate(pg_stat_statements_calls[5m]) >
+          (avg_over_time(rate(pg_stat_statements_calls[5m])[1h:5m]) * 3)
+        for: 10m
+        labels:
+          severity: info
+          component: security
+          layer: storage
+        annotations:
+          summary: "Unusual query pattern detected"
+          description: "Query rate is {{ $value }}x higher than normal on {{ $labels.instance }}."
+          runbook_url: "https://docs.llm-observatory.io/runbooks/unusual-pattern"

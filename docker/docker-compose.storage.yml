@@ -1,0 +1,173 @@
+# ============================================================================
+# Docker Compose Override for Storage Service Development
+# ============================================================================
+# This file provides additional configuration for storage service development
+# and testing scenarios.
+#
+# Usage:
+#   docker-compose -f docker-compose.yml -f docker/docker-compose.storage.yml up
+# ============================================================================
+
+version: '3.8'
+
+services:
+  # Storage service with additional debugging and profiling capabilities
+  storage-debug:
+    extends:
+      service: storage-dev
+    container_name: llm-observatory-storage-debug
+    environment:
+      # Enhanced debugging
+      RUST_LOG: trace
+      RUST_BACKTRACE: full
+      RUST_LIB_BACKTRACE: 1
+
+      # Enable SQL query logging
+      DB_QUERY_LOGGING: true
+
+      # Slower pool settings for debugging
+      DB_POOL_MIN_SIZE: 1
+      DB_POOL_MAX_SIZE: 5
+
+      # Smaller batches for easier debugging
+      COPY_BATCH_SIZE: 100
+      COPY_FLUSH_INTERVAL: 100
+    profiles:
+      - debug
+
+  # Storage benchmarking container
+  storage-bench:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.storage.dev
+    container_name: llm-observatory-storage-bench
+    environment:
+      DATABASE_URL: postgresql://${DB_APP_USER:-llm_observatory_app}:${DB_APP_PASSWORD:-change_me_in_production}@timescaledb:5432/${DB_NAME:-llm_observatory}
+      RUST_LOG: info
+      # Benchmark-specific settings
+      COPY_BATCH_SIZE: ${BENCH_BATCH_SIZE:-10000}
+      COPY_FLUSH_INTERVAL: ${BENCH_FLUSH_INTERVAL:-1000}
+      COPY_BUFFER_SIZE: ${BENCH_BUFFER_SIZE:-8192}
+    volumes:
+      - ../crates:/app/crates
+      - ../Cargo.toml:/app/Cargo.toml
+      - ../Cargo.lock:/app/Cargo.lock
+      - storage-bench-target:/app/target
+      - storage-cargo-registry:/usr/local/cargo/registry
+    networks:
+      - llm-observatory-network
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    command: cargo bench --package llm-observatory-storage
+    profiles:
+      - bench
+
+  # Storage testing container with isolated database
+  storage-test:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.storage.dev
+    container_name: llm-observatory-storage-test
+    environment:
+      # Test database (isolated from dev)
+      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@timescaledb-test:5432/llm_observatory_test
+      RUST_LOG: debug
+      # Faster settings for tests
+      DB_POOL_MIN_SIZE: 1
+      DB_POOL_MAX_SIZE: 5
+      COPY_BATCH_SIZE: 100
+      COPY_FLUSH_INTERVAL: 100
+    volumes:
+      - ../crates:/app/crates
+      - ../Cargo.toml:/app/Cargo.toml
+      - ../Cargo.lock:/app/Cargo.lock
+      - storage-test-target:/app/target
+      - storage-cargo-registry:/usr/local/cargo/registry
+    networks:
+      - llm-observatory-network
+    depends_on:
+      timescaledb-test:
+        condition: service_healthy
+    command: cargo nextest run --package llm-observatory-storage
+    profiles:
+      - test
+
+  # Separate test database
+  timescaledb-test:
+    image: timescale/timescaledb:2.14.2-pg16
+    container_name: llm-observatory-db-test
+    restart: "no"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: llm_observatory_test
+      TIMESCALEDB_TELEMETRY: "off"
+    volumes:
+      - timescaledb_test_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d llm_observatory_test"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    networks:
+      - llm-observatory-network
+    profiles:
+      - test
+
+  # Migration runner for specific migration testing
+  storage-migrate:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.storage.dev
+    container_name: llm-observatory-storage-migrate
+    environment:
+      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@timescaledb:5432/${DB_NAME:-llm_observatory}
+      RUST_LOG: info
+    volumes:
+      - ../crates/storage/migrations:/app/migrations:ro
+    networks:
+      - llm-observatory-network
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    command: sqlx migrate run --source /app/migrations
+    profiles:
+      - migrate
+
+volumes:
+  # Test-specific volumes
+  timescaledb_test_data:
+    name: llm-observatory-db-test-data
+  storage-bench-target:
+    name: llm-observatory-storage-bench-target
+  storage-test-target:
+    name: llm-observatory-storage-test-target
+
+# ============================================================================
+# Usage Examples:
+#
+# 1. Run storage service in debug mode:
+#    docker-compose --profile debug up storage-debug
+#
+# 2. Run benchmarks:
+#    docker-compose --profile bench up storage-bench
+#
+# 3. Run tests with isolated database:
+#    docker-compose --profile test up storage-test
+#
+# 4. Run specific benchmark:
+#    docker-compose --profile bench run storage-bench \
+#      cargo bench --package llm-observatory-storage -- copy_vs_insert
+#
+# 5. Run migrations manually:
+#    docker-compose --profile migrate up storage-migrate
+#
+# 6. Interactive benchmark session:
+#    docker-compose --profile bench run storage-bench bash
+#    # Then inside: cargo bench --package llm-observatory-storage
+#
+# 7. Test with different batch sizes:
+#    BENCH_BATCH_SIZE=50000 docker-compose --profile bench up storage-bench
+# ============================================================================

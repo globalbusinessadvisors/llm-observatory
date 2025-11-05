@@ -1,0 +1,342 @@
+version: '3.9'
+
+networks:
+  llm-observatory:
+    driver: bridge
+  customer-support:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  qdrant_data:
+  redis_data:
+
+services:
+  # ============================================================================
+  # Infrastructure Services
+  # ============================================================================
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: cs-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-customer_support}
+      POSTGRES_INITDB_ARGS: "-E UTF8 --locale=C"
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - customer-support
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: cs-qdrant
+    restart: unless-stopped
+    ports:
+      - "${QDRANT_PORT:-6333}:6333"
+      - "${QDRANT_GRPC_PORT:-6334}:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+      - ./docker/qdrant/config.yaml:/qdrant/config/production.yaml:ro
+    networks:
+      - customer-support
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:6333/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: cs-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --maxmemory ${REDIS_MAXMEMORY:-256mb}
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+      --requirepass ${REDIS_PASSWORD:-redis_password}
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - customer-support
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ============================================================================
+  # Backend Services
+  # ============================================================================
+
+  chat-api:
+    build:
+      context: ./services/chat-api
+      dockerfile: Dockerfile
+      target: ${BUILD_TARGET:-production}
+    container_name: cs-chat-api
+    restart: unless-stopped
+    environment:
+      # Application
+      SERVICE_NAME: chat-api
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      PORT: 8000
+      WORKERS: ${CHAT_API_WORKERS:-4}
+
+      # Database
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-customer_support}
+
+      # Redis
+      REDIS_URL: redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/0
+
+      # Vector DB
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
+
+      # LLM Providers
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:-}
+      AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT:-}
+      AZURE_OPENAI_API_VERSION: ${AZURE_OPENAI_API_VERSION:-2024-02-15-preview}
+
+      # LLM Observatory
+      LLM_OBSERVATORY_ENABLED: ${LLM_OBSERVATORY_ENABLED:-true}
+      LLM_OBSERVATORY_URL: ${LLM_OBSERVATORY_URL:-http://llm-observatory-api:3000}
+      LLM_OBSERVATORY_API_KEY: ${LLM_OBSERVATORY_API_KEY:-}
+
+      # Service Configuration
+      MAX_CONVERSATION_HISTORY: ${MAX_CONVERSATION_HISTORY:-20}
+      MAX_TOKENS_PER_REQUEST: ${MAX_TOKENS_PER_REQUEST:-4096}
+      TIMEOUT_SECONDS: ${TIMEOUT_SECONDS:-30}
+
+      # CORS
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:5173}
+    ports:
+      - "${CHAT_API_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    networks:
+      - customer-support
+      - llm-observatory
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    volumes:
+      - ./services/chat-api:/app:cached
+      - /app/.venv
+
+  kb-api:
+    build:
+      context: ./services/kb-api
+      dockerfile: Dockerfile
+      target: ${BUILD_TARGET:-production}
+    container_name: cs-kb-api
+    restart: unless-stopped
+    environment:
+      # Application
+      NODE_ENV: ${NODE_ENV:-production}
+      SERVICE_NAME: kb-api
+      PORT: 8001
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+
+      # Database
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-customer_support}
+
+      # Redis
+      REDIS_URL: redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/1
+
+      # Vector DB
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-knowledge_base}
+
+      # Embeddings
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+      EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1536}
+
+      # LLM Observatory
+      LLM_OBSERVATORY_ENABLED: ${LLM_OBSERVATORY_ENABLED:-true}
+      LLM_OBSERVATORY_URL: ${LLM_OBSERVATORY_URL:-http://llm-observatory-api:3000}
+      LLM_OBSERVATORY_API_KEY: ${LLM_OBSERVATORY_API_KEY:-}
+
+      # Service Configuration
+      CHUNK_SIZE: ${CHUNK_SIZE:-1000}
+      CHUNK_OVERLAP: ${CHUNK_OVERLAP:-200}
+      TOP_K_RESULTS: ${TOP_K_RESULTS:-5}
+      SIMILARITY_THRESHOLD: ${SIMILARITY_THRESHOLD:-0.7}
+
+      # CORS
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:5173}
+    ports:
+      - "${KB_API_PORT:-8001}:8001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    networks:
+      - customer-support
+      - llm-observatory
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    volumes:
+      - ./services/kb-api:/app:cached
+      - /app/node_modules
+
+  analytics-api:
+    build:
+      context: ./services/analytics-api
+      dockerfile: Dockerfile
+      target: ${BUILD_TARGET:-production}
+    container_name: cs-analytics-api
+    restart: unless-stopped
+    environment:
+      # Application
+      SERVICE_NAME: analytics-api
+      RUST_LOG: ${RUST_LOG:-info}
+      PORT: 8002
+
+      # Database
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-customer_support}
+
+      # Redis
+      REDIS_URL: redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/2
+
+      # LLM Observatory
+      LLM_OBSERVATORY_ENABLED: ${LLM_OBSERVATORY_ENABLED:-true}
+      LLM_OBSERVATORY_URL: ${LLM_OBSERVATORY_URL:-http://llm-observatory-api:3000}
+      LLM_OBSERVATORY_API_KEY: ${LLM_OBSERVATORY_API_KEY:-}
+
+      # Service Configuration
+      METRICS_WINDOW_SECONDS: ${METRICS_WINDOW_SECONDS:-3600}
+      CACHE_TTL_SECONDS: ${CACHE_TTL_SECONDS:-300}
+      MAX_QUERY_LIMIT: ${MAX_QUERY_LIMIT:-1000}
+
+      # CORS
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:5173}
+    ports:
+      - "${ANALYTICS_API_PORT:-8002}:8002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - customer-support
+      - llm-observatory
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    volumes:
+      - ./services/analytics-api:/app:cached
+      - /app/target
+
+  # ============================================================================
+  # Frontend
+  # ============================================================================
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: ${BUILD_TARGET:-production}
+      args:
+        VITE_CHAT_API_URL: ${VITE_CHAT_API_URL:-http://localhost:8000}
+        VITE_KB_API_URL: ${VITE_KB_API_URL:-http://localhost:8001}
+        VITE_ANALYTICS_API_URL: ${VITE_ANALYTICS_API_URL:-http://localhost:8002}
+    container_name: cs-frontend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      VITE_CHAT_API_URL: ${VITE_CHAT_API_URL:-http://localhost:8000}
+      VITE_KB_API_URL: ${VITE_KB_API_URL:-http://localhost:8001}
+      VITE_ANALYTICS_API_URL: ${VITE_ANALYTICS_API_URL:-http://localhost:8002}
+      VITE_WS_URL: ${VITE_WS_URL:-ws://localhost:8000/ws}
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    depends_on:
+      - chat-api
+      - kb-api
+      - analytics-api
+    networks:
+      - customer-support
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    volumes:
+      - ./frontend:/app:cached
+      - /app/node_modules
+      - /app/dist
+
+  # ============================================================================
+  # LLM Observatory Integration (Optional)
+  # ============================================================================
+  # Uncomment the following services to run LLM Observatory alongside this app
+  # Or use external LLM Observatory instance by setting LLM_OBSERVATORY_URL
+
+  # llm-observatory-api:
+  #   image: llm-observatory/api:latest
+  #   container_name: llm-observatory-api
+  #   restart: unless-stopped
+  #   environment:
+  #     DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/llm_observatory
+  #     REDIS_URL: redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/3
+  #     PORT: 3000
+  #   ports:
+  #     - "3000:3000"
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+  #   networks:
+  #     - llm-observatory
+
+  # llm-observatory-ui:
+  #   image: llm-observatory/ui:latest
+  #   container_name: llm-observatory-ui
+  #   restart: unless-stopped
+  #   environment:
+  #     VITE_API_URL: http://localhost:3000
+  #   ports:
+  #     - "3001:3001"
+  #   depends_on:
+  #     - llm-observatory-api
+  #   networks:
+  #     - llm-observatory

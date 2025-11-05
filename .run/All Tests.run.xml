@@ -1,0 +1,24 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="All Tests" type="CargoCommandRunConfiguration" factoryName="Cargo Command">
+    <option name="command" value="test --workspace --all-targets" />
+    <option name="workingDirectory" value="file://$PROJECT_DIR$" />
+    <option name="channel" value="DEFAULT" />
+    <option name="requiredFeatures" value="true" />
+    <option name="allFeatures" value="false" />
+    <option name="emulateTerminal" value="false" />
+    <option name="withSudo" value="false" />
+    <option name="buildTarget" value="REMOTE" />
+    <option name="backtrace" value="SHORT" />
+    <envs>
+      <env name="RUST_LOG" value="debug" />
+      <env name="RUST_BACKTRACE" value="1" />
+      <env name="DATABASE_URL" value="postgresql://postgres:postgres@localhost:5432/llm_observatory_test" />
+      <env name="REDIS_URL" value="redis://:redis_password@localhost:6379/1" />
+    </envs>
+    <option name="isRedirectInput" value="false" />
+    <option name="redirectInputPath" value="" />
+    <method v="2">
+      <option name="CARGO.BUILD_TASK_PROVIDER" enabled="true" />
+    </method>
+  </configuration>
+</component>

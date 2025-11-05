@@ -1,0 +1,314 @@
+version: '3.8'
+
+# Development environment with hot reload and fast iteration
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+services:
+  # Override TimescaleDB for development
+  timescaledb:
+    environment:
+      # Reduce PostgreSQL logging for development
+      POSTGRES_SHARED_BUFFERS: 128MB
+      POSTGRES_WORK_MEM: 16MB
+      POSTGRES_MAINTENANCE_WORK_MEM: 64MB
+      POSTGRES_EFFECTIVE_CACHE_SIZE: 512MB
+    volumes:
+      # Add development seed data
+      - ./docker/init:/docker-entrypoint-initdb.d:ro
+      - ./docker/seed:/docker-seed-data:ro
+    command: >
+      postgres
+      -c shared_preload_libraries=timescaledb
+      -c max_connections=200
+      -c log_statement=all
+      -c log_duration=on
+      -c log_min_duration_statement=0
+      -c log_line_prefix='%t [%p]: user=%u,db=%d,app=%a,client=%h '
+      -c fsync=off
+      -c synchronous_commit=off
+      -c full_page_writes=off
+      -c checkpoint_timeout=1h
+      -c max_wal_size=2GB
+
+  # Override Redis for development
+  redis:
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD:-redis_password}
+      --maxmemory 128mb
+      --maxmemory-policy allkeys-lru
+      --appendonly no
+      --save ""
+      --loglevel verbose
+
+  # LLM Observatory Collector with hot reload
+  collector:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dev
+      args:
+        SERVICE_NAME: llm-observatory-collector
+        SERVICE_PATH: crates/collector
+      target: development
+    container_name: llm-observatory-collector-dev
+    restart: unless-stopped
+    ports:
+      - "${COLLECTOR_OTLP_HTTP_PORT:-4318}:4318"  # OTLP HTTP
+      - "${COLLECTOR_OTLP_GRPC_PORT:-4317}:4317"  # OTLP gRPC
+      - "${COLLECTOR_METRICS_PORT:-9091}:9090"    # Prometheus metrics
+    environment:
+      # Service configuration
+      RUST_LOG: ${COLLECTOR_LOG_LEVEL:-debug}
+      RUST_BACKTRACE: ${RUST_BACKTRACE:-1}
+
+      # Database configuration
+      DATABASE_URL: postgresql://${DB_APP_USER:-llm_observatory_app}:${DB_APP_PASSWORD:-change_me_in_production}@timescaledb:5432/${DB_NAME:-llm_observatory}
+      DB_POOL_MAX_SIZE: ${COLLECTOR_DB_POOL_MAX_SIZE:-10}
+      DB_POOL_MIN_SIZE: ${COLLECTOR_DB_POOL_MIN_SIZE:-2}
+
+      # Redis configuration
+      REDIS_URL: redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/${REDIS_DB:-0}
+
+      # Development settings
+      ENVIRONMENT: development
+      DEBUG: "true"
+      AUTO_RELOAD: "true"
+
+      # OTLP endpoints
+      OTLP_HTTP_ENDPOINT: 0.0.0.0:4318
+      OTLP_GRPC_ENDPOINT: 0.0.0.0:4317
+
+      # Performance tuning for development
+      BATCH_SIZE: ${COLLECTOR_BATCH_SIZE:-100}
+      BATCH_TIMEOUT_MS: ${COLLECTOR_BATCH_TIMEOUT_MS:-1000}
+
+      # Metrics
+      METRICS_ENABLED: "true"
+      METRICS_ENDPOINT: 0.0.0.0:9090
+    volumes:
+      # Mount source code for hot reload
+      - ./crates:/app/crates:ro
+      - ./Cargo.toml:/app/Cargo.toml:ro
+      - ./Cargo.lock:/app/Cargo.lock:ro
+
+      # Shared cargo cache volumes
+      - cargo_registry:/usr/local/cargo/registry
+      - cargo_git:/usr/local/cargo/git
+      - collector_target:/app/target
+
+      # Configuration files
+      - ./.env:/app/.env:ro
+    networks:
+      - llm-observatory-network
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9090/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # LLM Observatory API with hot reload
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dev
+      args:
+        SERVICE_NAME: llm-observatory-api
+        SERVICE_PATH: crates/api
+      target: development
+    container_name: llm-observatory-api-dev
+    restart: unless-stopped
+    ports:
+      - "${API_PORT:-8080}:8080"
+      - "${API_METRICS_PORT:-9092}:9090"
+    environment:
+      # Service configuration
+      RUST_LOG: ${API_LOG_LEVEL:-debug}
+      RUST_BACKTRACE: ${RUST_BACKTRACE:-1}
+
+      # Database configuration
+      DATABASE_URL: postgresql://${DB_APP_USER:-llm_observatory_app}:${DB_APP_PASSWORD:-change_me_in_production}@timescaledb:5432/${DB_NAME:-llm_observatory}
+      DB_POOL_MAX_SIZE: ${API_DB_POOL_MAX_SIZE:-20}
+      DB_POOL_MIN_SIZE: ${API_DB_POOL_MIN_SIZE:-5}
+      DB_QUERY_LOGGING: ${DB_QUERY_LOGGING:-true}
+
+      # Redis configuration
+      REDIS_URL: redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/${REDIS_DB:-0}
+
+      # Development settings
+      ENVIRONMENT: development
+      DEBUG: "true"
+      AUTO_RELOAD: "true"
+
+      # API server settings
+      API_HOST: 0.0.0.0
+      API_PORT: 8080
+
+      # CORS (permissive for development)
+      CORS_ORIGINS: "*"
+      CORS_ALLOW_CREDENTIALS: "true"
+
+      # Rate limiting (relaxed for development)
+      RATE_LIMIT_REQUESTS: 1000
+      RATE_LIMIT_WINDOW: 60
+
+      # Security (development keys)
+      SECRET_KEY: ${SECRET_KEY:-dev_secret_key_change_in_production}
+      JWT_SECRET: ${JWT_SECRET:-dev_jwt_secret_change_in_production}
+      JWT_EXPIRATION: ${JWT_EXPIRATION:-86400}
+
+      # Metrics
+      METRICS_ENABLED: "true"
+      METRICS_ENDPOINT: 0.0.0.0:9090
+    volumes:
+      # Mount source code for hot reload
+      - ./crates:/app/crates:ro
+      - ./Cargo.toml:/app/Cargo.toml:ro
+      - ./Cargo.lock:/app/Cargo.lock:ro
+
+      # Shared cargo cache volumes
+      - cargo_registry:/usr/local/cargo/registry
+      - cargo_git:/usr/local/cargo/git
+      - api_target:/app/target
+
+      # Configuration files
+      - ./.env:/app/.env:ro
+    networks:
+      - llm-observatory-network
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # LLM Observatory Storage Service with hot reload
+  storage:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dev
+      args:
+        SERVICE_NAME: llm-observatory-storage
+        SERVICE_PATH: crates/storage
+      target: development
+    container_name: llm-observatory-storage-dev
+    restart: unless-stopped
+    ports:
+      - "${STORAGE_PORT:-8081}:8081"
+      - "${STORAGE_METRICS_PORT:-9093}:9090"
+    environment:
+      # Service configuration
+      RUST_LOG: ${STORAGE_LOG_LEVEL:-debug}
+      RUST_BACKTRACE: ${RUST_BACKTRACE:-1}
+
+      # Database configuration
+      DATABASE_URL: postgresql://${DB_APP_USER:-llm_observatory_app}:${DB_APP_PASSWORD:-change_me_in_production}@timescaledb:5432/${DB_NAME:-llm_observatory}
+      DB_POOL_MAX_SIZE: ${STORAGE_DB_POOL_MAX_SIZE:-15}
+      DB_POOL_MIN_SIZE: ${STORAGE_DB_POOL_MIN_SIZE:-3}
+      DB_QUERY_LOGGING: ${DB_QUERY_LOGGING:-true}
+
+      # Redis configuration
+      REDIS_URL: redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/${REDIS_DB:-0}
+
+      # Development settings
+      ENVIRONMENT: development
+      DEBUG: "true"
+      AUTO_RELOAD: "true"
+
+      # Storage service settings
+      STORAGE_HOST: 0.0.0.0
+      STORAGE_PORT: 8081
+
+      # Retention policies (development)
+      RETENTION_RAW_DATA_DAYS: ${RETENTION_RAW_DATA_DAYS:-7}
+      RETENTION_AGGREGATED_DATA_DAYS: ${RETENTION_AGGREGATED_DATA_DAYS:-90}
+
+      # Compression settings
+      ENABLE_COMPRESSION: ${ENABLE_COMPRESSION:-true}
+      COMPRESSION_AFTER_DAYS: ${COMPRESSION_AFTER_DAYS:-1}
+
+      # Metrics
+      METRICS_ENABLED: "true"
+      METRICS_ENDPOINT: 0.0.0.0:9090
+    volumes:
+      # Mount source code for hot reload
+      - ./crates:/app/crates:ro
+      - ./Cargo.toml:/app/Cargo.toml:ro
+      - ./Cargo.lock:/app/Cargo.lock:ro
+
+      # Shared cargo cache volumes
+      - cargo_registry:/usr/local/cargo/registry
+      - cargo_git:/usr/local/cargo/git
+      - storage_target:/app/target
+
+      # Configuration files
+      - ./.env:/app/.env:ro
+    networks:
+      - llm-observatory-network
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8081/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # Development utilities service
+  dev-utils:
+    image: postgres:16-alpine
+    container_name: llm-observatory-dev-utils
+    restart: "no"
+    environment:
+      PGHOST: timescaledb
+      PGPORT: 5432
+      PGDATABASE: ${DB_NAME:-llm_observatory}
+      PGUSER: ${DB_USER:-postgres}
+      PGPASSWORD: ${DB_PASSWORD:-postgres}
+    volumes:
+      - ./docker/seed:/seed-data:ro
+      - ./scripts:/scripts:ro
+    networks:
+      - llm-observatory-network
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    profiles:
+      - utils
+    entrypoint: ["/bin/sh"]
+    command:
+      - -c
+      - |
+        echo "Development utilities ready"
+        echo "Available scripts:"
+        echo "  - Seed database: psql < /seed-data/seed.sql"
+        echo "  - Reset database: psql < /seed-data/reset.sql"
+        tail -f /dev/null
+
+volumes:
+  # Cargo build cache volumes (shared across builds)
+  cargo_registry:
+    name: llm-observatory-cargo-registry
+  cargo_git:
+    name: llm-observatory-cargo-git
+
+  # Per-service target directories (for incremental builds)
+  collector_target:
+    name: llm-observatory-collector-target
+  api_target:
+    name: llm-observatory-api-target
+  storage_target:
+    name: llm-observatory-storage-target

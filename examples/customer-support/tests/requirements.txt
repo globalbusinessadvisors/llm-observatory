@@ -1,0 +1,32 @@
+# Test dependencies for customer support platform
+
+# Core testing
+pytest==7.4.3
+pytest-asyncio==0.21.1
+pytest-cov==4.1.0
+pytest-xdist==3.5.0
+pytest-timeout==2.2.0
+
+# HTTP client
+httpx==0.25.2
+
+# Async support
+asyncio==3.4.3
+
+# Date/time utilities
+python-dateutil==2.8.2
+
+# Fixtures and utilities
+faker==20.1.0
+
+# Playwright (for E2E tests)
+playwright==1.40.0
+
+# Reporting
+coverage==7.3.2
+
+# Linting and formatting (optional but recommended)
+black==23.11.0
+isort==5.13.2
+flake8==6.1.0
+mypy==1.7.1

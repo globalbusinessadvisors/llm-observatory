@@ -1,0 +1,52 @@
+[
+  {
+    "id": "00000000-0000-0000-0000-000000000001",
+    "email": "admin@test.local",
+    "username": "admin",
+    "password": "admin123",
+    "password_hash": "$argon2id$v=19$m=19456,t=2,p=1$aGFzaHNhbHRoYXNo$7Y3J8K9Z8J8K9Z8J8K9Z8J8K9Z8J8K9Z",
+    "is_active": true,
+    "is_admin": true,
+    "description": "Administrator account for testing"
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000000002",
+    "email": "user1@test.local",
+    "username": "user1",
+    "password": "user123",
+    "password_hash": "$argon2id$v=19$m=19456,t=2,p=1$dXNlcnNhbHR1c2Vy$8Z4K0A9B0A9B0A9B0A9B0A9B0A9B0A9B",
+    "is_active": true,
+    "is_admin": false,
+    "description": "Regular user account for testing"
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000000003",
+    "email": "user2@test.local",
+    "username": "user2",
+    "password": "user123",
+    "password_hash": "$argon2id$v=19$m=19456,t=2,p=1$dXNlcnNhbHR1c2Vy$8Z4K0A9B0A9B0A9B0A9B0A9B0A9B0A9B",
+    "is_active": true,
+    "is_admin": false,
+    "description": "Second regular user for multi-user testing"
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000000004",
+    "email": "inactive@test.local",
+    "username": "inactive_user",
+    "password": "inactive123",
+    "password_hash": "$argon2id$v=19$m=19456,t=2,p=1$aW5hY3RpdmVzYWx0$9A5L1B0C1B0C1B0C1B0C1B0C1B0C1B0C",
+    "is_active": false,
+    "is_admin": false,
+    "description": "Inactive user for testing authentication failures"
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000000005",
+    "email": "developer@test.local",
+    "username": "developer",
+    "password": "dev123",
+    "password_hash": "$argon2id$v=19$m=19456,t=2,p=1$ZGV2ZWxvcGVyc2FsdA$0B6M2C1D2C1D2C1D2C1D2C1D2C1D2C1D",
+    "is_active": true,
+    "is_admin": false,
+    "description": "Developer account with API access"
+  }
+]

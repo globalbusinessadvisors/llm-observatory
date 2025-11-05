@@ -1,0 +1,390 @@
+# GitLab CI/CD configuration for LLM Observatory
+# Comprehensive test pipeline with Docker, coverage, and parallel execution
+
+# Global variables
+variables:
+  CARGO_HOME: "${CI_PROJECT_DIR}/.cargo"
+  RUST_BACKTRACE: "1"
+  CARGO_TERM_COLOR: always
+  DOCKER_DRIVER: overlay2
+  DOCKER_TLS_CERTDIR: "/certs"
+
+# Define stages
+stages:
+  - prepare
+  - validate
+  - test
+  - coverage
+  - report
+  - deploy
+
+# Default configuration
+default:
+  retry:
+    max: 2
+    when:
+      - runner_system_failure
+      - stuck_or_timeout_failure
+
+# Cache configuration for Rust builds
+.rust-cache:
+  cache:
+    key: "${CI_COMMIT_REF_SLUG}-rust"
+    paths:
+      - .cargo/
+      - target/
+    policy: pull-push
+
+# Docker-in-Docker template
+.docker-template:
+  image: docker:24-alpine
+  services:
+    - docker:24-dind
+  before_script:
+    - apk add --no-cache docker-compose
+
+# Rust template
+.rust-template:
+  image: rust:1.75-slim-bookworm
+  before_script:
+    - apt-get update && apt-get install -y build-essential pkg-config libssl-dev
+    - rustc --version
+    - cargo --version
+
+# ============================================================================
+# PREPARE STAGE
+# ============================================================================
+
+# Build Docker test image and cache it
+build-test-image:
+  stage: prepare
+  extends: .docker-template
+  script:
+    - docker build
+      --file docker/Dockerfile.test
+      --target test-runner
+      --tag ${CI_REGISTRY_IMAGE}/test-runner:${CI_COMMIT_SHA}
+      --tag ${CI_REGISTRY_IMAGE}/test-runner:latest
+      --cache-from ${CI_REGISTRY_IMAGE}/test-runner:latest
+      .
+    - docker login -u ${CI_REGISTRY_USER} -p ${CI_REGISTRY_PASSWORD} ${CI_REGISTRY}
+    - docker push ${CI_REGISTRY_IMAGE}/test-runner:${CI_COMMIT_SHA}
+    - docker push ${CI_REGISTRY_IMAGE}/test-runner:latest
+  only:
+    - merge_requests
+    - main
+    - develop
+
+# Download and cache dependencies
+cache-dependencies:
+  stage: prepare
+  extends:
+    - .rust-template
+    - .rust-cache
+  script:
+    - cargo fetch
+    - cargo build --workspace --all-features --release --locked
+  only:
+    - merge_requests
+    - main
+    - develop
+
+# ============================================================================
+# VALIDATE STAGE
+# ============================================================================
+
+# Check code formatting
+format-check:
+  stage: validate
+  extends: .rust-template
+  script:
+    - rustup component add rustfmt
+    - cargo fmt --all -- --check
+  allow_failure: false
+
+# Run clippy linter
+clippy:
+  stage: validate
+  extends:
+    - .rust-template
+    - .rust-cache
+  script:
+    - rustup component add clippy
+    - cargo clippy --workspace --all-features --all-targets -- -D warnings
+  allow_failure: false
+
+# Check documentation
+doc-check:
+  stage: validate
+  extends:
+    - .rust-template
+    - .rust-cache
+  script:
+    - cargo doc --workspace --all-features --no-deps
+  artifacts:
+    paths:
+      - target/doc/
+    expire_in: 1 week
+  allow_failure: false
+
+# Security audit
+security-audit:
+  stage: validate
+  extends: .rust-template
+  script:
+    - cargo install cargo-audit --locked
+    - cargo audit --json > audit-report.json
+  artifacts:
+    reports:
+      junit: audit-report.json
+    paths:
+      - audit-report.json
+    expire_in: 1 month
+  allow_failure: true
+
+# ============================================================================
+# TEST STAGE
+# ============================================================================
+
+# Unit tests - fast, no dependencies
+unit-tests:
+  stage: test
+  extends:
+    - .rust-template
+    - .rust-cache
+  script:
+    - cargo install cargo-nextest --locked
+    - cargo nextest run --workspace --lib --all-features --profile ci
+  artifacts:
+    reports:
+      junit: target/nextest/ci/junit.xml
+    paths:
+      - target/nextest/ci/
+    expire_in: 1 week
+  coverage: '/Coverage: \d+\.\d+%/'
+
+# Integration tests - with Docker services
+integration-tests:
+  stage: test
+  extends:
+    - .rust-template
+    - .rust-cache
+  services:
+    - name: timescale/timescaledb:2.14.2-pg16
+      alias: postgres
+      variables:
+        POSTGRES_USER: test_user
+        POSTGRES_PASSWORD: test_password
+        POSTGRES_DB: llm_observatory_test
+        TIMESCALEDB_TELEMETRY: "off"
+    - name: redis:7.2-alpine
+      alias: redis
+  variables:
+    DATABASE_URL: "postgres://test_user:test_password@postgres:5432/llm_observatory_test"
+    REDIS_URL: "redis://redis:6379"
+    RUST_LOG: "info,sqlx=warn"
+  script:
+    - apt-get update && apt-get install -y postgresql-client netcat-openbsd
+    - |
+      # Wait for services
+      until nc -z postgres 5432; do sleep 1; done
+      until nc -z redis 6379; do sleep 1; done
+    - cargo install cargo-nextest sqlx-cli --locked
+    - |
+      # Run migrations if they exist
+      if [ -d migrations ]; then
+        sqlx migrate run --source migrations
+      fi
+    - cargo nextest run --workspace --test '*' --all-features --profile ci
+  artifacts:
+    reports:
+      junit: target/nextest/ci/junit.xml
+    paths:
+      - target/nextest/ci/
+    expire_in: 1 week
+
+# Parallel tests using matrix
+.parallel-test-template:
+  stage: test
+  extends:
+    - .rust-template
+    - .rust-cache
+  services:
+    - name: timescale/timescaledb:2.14.2-pg16
+      alias: postgres
+      variables:
+        POSTGRES_USER: test_user
+        POSTGRES_PASSWORD: test_password
+        POSTGRES_DB: llm_observatory_test
+    - name: redis:7.2-alpine
+      alias: redis
+  variables:
+    DATABASE_URL: "postgres://test_user:test_password@postgres:5432/llm_observatory_test"
+    REDIS_URL: "redis://redis:6379"
+  script:
+    - apt-get update && apt-get install -y postgresql-client netcat-openbsd
+    - until nc -z postgres 5432; do sleep 1; done
+    - until nc -z redis 6379; do sleep 1; done
+    - cargo install cargo-nextest --locked
+    - |
+      cargo nextest run \
+        --workspace \
+        --all-features \
+        --profile ci \
+        --partition hash:${SHARD_INDEX}/${SHARD_TOTAL}
+  artifacts:
+    reports:
+      junit: target/nextest/ci/junit.xml
+    paths:
+      - target/nextest/ci/
+    expire_in: 1 week
+
+parallel-test-1:
+  extends: .parallel-test-template
+  variables:
+    SHARD_INDEX: "0"
+    SHARD_TOTAL: "4"
+
+parallel-test-2:
+  extends: .parallel-test-template
+  variables:
+    SHARD_INDEX: "1"
+    SHARD_TOTAL: "4"
+
+parallel-test-3:
+  extends: .parallel-test-template
+  variables:
+    SHARD_INDEX: "2"
+    SHARD_TOTAL: "4"
+
+parallel-test-4:
+  extends: .parallel-test-template
+  variables:
+    SHARD_INDEX: "3"
+    SHARD_TOTAL: "4"
+
+# Docker-based test suite
+docker-tests:
+  stage: test
+  extends: .docker-template
+  needs: ["build-test-image"]
+  script:
+    - docker compose -f docker-compose.test.yml up -d timescaledb-test redis-test
+    - docker compose -f docker-compose.test.yml ps
+    # Wait for services
+    - timeout 60 sh -c 'until docker compose -f docker-compose.test.yml exec -T timescaledb-test pg_isready -U test_user; do sleep 2; done'
+    - timeout 60 sh -c 'until docker compose -f docker-compose.test.yml exec -T redis-test redis-cli ping; do sleep 2; done'
+    # Run tests
+    - docker compose -f docker-compose.test.yml run --rm test-runner
+    # Copy results
+    - docker compose -f docker-compose.test.yml cp test-runner:/workspace/test-results ./test-results
+  after_script:
+    - docker compose -f docker-compose.test.yml down -v
+  artifacts:
+    reports:
+      junit: test-results/junit.xml
+    paths:
+      - test-results/
+    expire_in: 1 week
+  allow_failure: false
+
+# ============================================================================
+# COVERAGE STAGE
+# ============================================================================
+
+# Generate code coverage
+coverage:
+  stage: coverage
+  extends: .docker-template
+  needs: ["build-test-image"]
+  variables:
+    COVERAGE_FORMAT: "html,lcov,json"
+    MIN_COVERAGE: "70"
+  script:
+    - docker compose -f docker-compose.test.yml up -d timescaledb-test redis-test
+    # Wait for services
+    - timeout 60 sh -c 'until docker compose -f docker-compose.test.yml exec -T timescaledb-test pg_isready -U test_user; do sleep 2; done'
+    - timeout 60 sh -c 'until docker compose -f docker-compose.test.yml exec -T redis-test redis-cli ping; do sleep 2; done'
+    # Run coverage
+    - docker compose -f docker-compose.test.yml run --rm coverage-runner
+    # Copy results
+    - docker compose -f docker-compose.test.yml cp coverage-runner:/workspace/coverage ./coverage
+    # Extract coverage percentage
+    - |
+      COVERAGE=$(grep -oP 'Coverage: \K[\d.]+' coverage/coverage.log || echo "0")
+      echo "Code coverage: ${COVERAGE}%"
+  after_script:
+    - docker compose -f docker-compose.test.yml down -v
+  artifacts:
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage/cobertura.xml
+    paths:
+      - coverage/
+    expire_in: 1 month
+  coverage: '/Coverage: \d+\.\d+%/'
+  only:
+    - merge_requests
+    - main
+
+# ============================================================================
+# REPORT STAGE
+# ============================================================================
+
+# Generate test reports
+test-report:
+  stage: report
+  image: alpine:3.19
+  needs:
+    - unit-tests
+    - integration-tests
+    - parallel-test-1
+    - parallel-test-2
+    - parallel-test-3
+    - parallel-test-4
+  script:
+    - apk add --no-cache bash
+    - chmod +x docker/test/generate-test-report.sh
+    - ./docker/test/generate-test-report.sh
+  artifacts:
+    paths:
+      - test-results/report.html
+      - test-results/REPORT.md
+    expire_in: 1 month
+
+# Generate coverage badge
+coverage-badge:
+  stage: report
+  image: alpine:3.19
+  needs: ["coverage"]
+  script:
+    - apk add --no-cache curl jq
+    - |
+      COVERAGE=$(jq -r '.coverage_percentage' coverage/summary.json 2>/dev/null || echo "0")
+      echo "Coverage: ${COVERAGE}%"
+      # Generate badge (would integrate with shields.io or similar)
+      echo "{\"schemaVersion\": 1, \"label\": \"coverage\", \"message\": \"${COVERAGE}%\", \"color\": \"brightgreen\"}" > coverage-badge.json
+  artifacts:
+    paths:
+      - coverage-badge.json
+    expire_in: 1 month
+  only:
+    - main
+
+# ============================================================================
+# DEPLOY STAGE (for documentation)
+# ============================================================================
+
+# Deploy documentation to GitLab Pages
+pages:
+  stage: deploy
+  needs: ["doc-check"]
+  script:
+    - mkdir -p public
+    - cp -r target/doc/* public/
+  artifacts:
+    paths:
+      - public
+  only:
+    - main

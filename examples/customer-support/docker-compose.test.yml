@@ -1,0 +1,260 @@
+version: '3.9'
+
+networks:
+  test-network:
+    driver: bridge
+
+volumes:
+  postgres_test_data:
+  qdrant_test_data:
+  redis_test_data:
+
+services:
+  # ============================================================================
+  # Test Infrastructure Services
+  # ============================================================================
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: cs-postgres-test
+    environment:
+      POSTGRES_USER: test_user
+      POSTGRES_PASSWORD: test_password
+      POSTGRES_DB: test_db
+      POSTGRES_INITDB_ARGS: "-E UTF8 --locale=C"
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+    networks:
+      - test-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test_user"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: cs-redis-test
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_test_data:/data
+    networks:
+      - test-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    command: redis-server --appendonly yes
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: cs-qdrant-test
+    ports:
+      - "6334:6333"
+      - "6335:6334"
+    volumes:
+      - qdrant_test_data:/qdrant/storage
+    networks:
+      - test-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:6333/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ============================================================================
+  # Test Chat API Service
+  # ============================================================================
+
+  chat-api-test:
+    build:
+      context: ./services/chat-api
+      dockerfile: Dockerfile
+    container_name: cs-chat-api-test
+    environment:
+      DATABASE_URL: postgresql://test_user:test_password@postgres:5432/test_db
+      REDIS_URL: redis://redis:6379/0
+      CHAT_API_WORKERS: 2
+      LOG_LEVEL: INFO
+      ENVIRONMENT: test
+      # Providers - use test credentials if available
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-sk-test}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-sk-ant-test}
+      # Observatory
+      LLM_OBSERVATORY_ENABLED: ${LLM_OBSERVATORY_ENABLED:-false}
+      LLM_OBSERVATORY_URL: http://localhost:3000
+    ports:
+      - "8001:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - test-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - ./services/chat-api:/app
+
+  # ============================================================================
+  # Test KB API Service
+  # ============================================================================
+
+  kb-api-test:
+    build:
+      context: ./services/kb-api
+      dockerfile: Dockerfile
+    container_name: cs-kb-api-test
+    environment:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://test_user:test_password@postgres:5432/test_db
+      QDRANT_URL: http://qdrant:6333
+      REDIS_URL: redis://redis:6379/1
+      LOG_LEVEL: info
+      # Embeddings
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-sk-test}
+      EMBEDDING_MODEL: text-embedding-3-small
+      # Observatory
+      LLM_OBSERVATORY_ENABLED: ${LLM_OBSERVATORY_ENABLED:-false}
+      LLM_OBSERVATORY_URL: http://localhost:3000
+    ports:
+      - "8002:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    networks:
+      - test-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - ./services/kb-api:/app
+      - /app/node_modules
+
+  # ============================================================================
+  # Test Analytics API Service
+  # ============================================================================
+
+  analytics-api-test:
+    build:
+      context: ./services/analytics-api
+      dockerfile: Dockerfile
+    container_name: cs-analytics-api-test
+    environment:
+      DATABASE_URL: postgresql://test_user:test_password@postgres:5432/test_db
+      REDIS_URL: redis://redis:6379/2
+      RUST_LOG: info
+      ENVIRONMENT: test
+    ports:
+      - "8003:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - test-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ============================================================================
+  # Test Frontend Service
+  # ============================================================================
+
+  frontend-test:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: cs-frontend-test
+    environment:
+      VITE_API_URL: http://localhost:8001
+      VITE_KB_API_URL: http://localhost:8002
+      VITE_ANALYTICS_API_URL: http://localhost:8003
+    ports:
+      - "3001:80"
+    depends_on:
+      - chat-api-test
+      - kb-api-test
+      - analytics-api-test
+    networks:
+      - test-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ============================================================================
+  # Test Utilities
+  # ============================================================================
+
+  test-runner:
+    image: python:3.11-slim
+    container_name: cs-test-runner
+    working_dir: /workspace
+    environment:
+      PYTHONUNBUFFERED: 1
+      PYTHONDONTWRITEBYTECODE: 1
+      DATABASE_URL: postgresql://test_user:test_password@postgres:5432/test_db
+      REDIS_URL: redis://redis:6379/0
+      CHAT_API_URL: http://chat-api-test:8000
+      KB_API_URL: http://kb-api-test:3000
+      ANALYTICS_API_URL: http://analytics-api-test:8000
+    depends_on:
+      - chat-api-test
+      - kb-api-test
+      - analytics-api-test
+    volumes:
+      - .:/workspace
+    networks:
+      - test-network
+    command: sleep infinity
+
+  playwright-runner:
+    image: mcr.microsoft.com/playwright:v1.40.0-focal
+    container_name: cs-playwright-runner
+    working_dir: /workspace
+    environment:
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 0
+      HEADLESS: 1
+    depends_on:
+      - frontend-test
+    volumes:
+      - .:/workspace
+    networks:
+      - test-network
+    command: sleep infinity
+
+  k6-runner:
+    image: grafana/k6:latest
+    container_name: cs-k6-runner
+    working_dir: /workspace
+    environment:
+      K6_VUS: 1
+      K6_DURATION: 10s
+    depends_on:
+      - chat-api-test
+      - kb-api-test
+      - analytics-api-test
+    volumes:
+      - .:/workspace
+    networks:
+      - test-network
+    command: sleep infinity

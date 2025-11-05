@@ -1,4 +1,5 @@
-# Prometheus configuration for LLM Observatory Storage Monitoring
+# Prometheus configuration for LLM Observatory
+# Complete observability stack with metrics, alerts, and recording rules
 
 global:
   scrape_interval: 15s
@@ -7,49 +8,135 @@ global:
     cluster: 'llm-observatory'
     environment: 'development'
 
-# Alertmanager configuration (optional)
-# alerting:
-#   alertmanagers:
-#     - static_configs:
-#         - targets:
-#           - alertmanager:9093
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          - alertmanager:9093
 
-# Load rules once and periodically evaluate them
-# rule_files:
-#   - "alerts/*.yml"
+# Load alert and recording rules
+rule_files:
+  - "alerts/*.yml"
+  - "rules/*.yml"
 
 scrape_configs:
-  # LLM Observatory Storage metrics
-  - job_name: 'llm-observatory-storage'
-    scrape_interval: 10s
-    scrape_timeout: 5s
-    metrics_path: '/metrics'
-    static_configs:
-      # Adjust this to your storage service address
-      # For local development: host.docker.internal:9090
-      # For Docker Compose: storage:9090
-      - targets: ['host.docker.internal:9090']
-        labels:
-          service: 'storage'
-          component: 'backend'
-
   # Prometheus self-monitoring
   - job_name: 'prometheus'
     static_configs:
       - targets: ['localhost:9090']
         labels:
           service: 'prometheus'
+          component: 'monitoring'
 
-  # PostgreSQL metrics (if using postgres_exporter)
-  # - job_name: 'postgres'
-  #   static_configs:
-  #     - targets: ['postgres-exporter:9187']
-  #       labels:
-  #         service: 'postgres'
+  # PostgreSQL/TimescaleDB metrics
+  - job_name: 'timescaledb'
+    scrape_interval: 10s
+    scrape_timeout: 5s
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+        labels:
+          service: 'timescaledb'
+          component: 'database'
+          database: 'llm_observatory'
 
-  # Redis metrics (if using redis_exporter)
-  # - job_name: 'redis'
-  #   static_configs:
-  #     - targets: ['redis-exporter:9121']
-  #       labels:
-  #         service: 'redis'
+  # Redis metrics
+  - job_name: 'redis'
+    scrape_interval: 10s
+    scrape_timeout: 5s
+    static_configs:
+      - targets: ['redis-exporter:9121']
+        labels:
+          service: 'redis'
+          component: 'cache'
+
+  # Node/System metrics
+  - job_name: 'node'
+    scrape_interval: 15s
+    static_configs:
+      - targets: ['node-exporter:9100']
+        labels:
+          service: 'node-exporter'
+          component: 'system'
+
+  # LLM Observatory Collector (OTLP)
+  - job_name: 'llm-observatory-collector'
+    scrape_interval: 10s
+    scrape_timeout: 5s
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['collector:9090']
+        labels:
+          service: 'collector'
+          component: 'telemetry'
+
+  # LLM Observatory Storage Layer
+  - job_name: 'llm-observatory-storage'
+    scrape_interval: 10s
+    scrape_timeout: 5s
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['storage:9091']
+        labels:
+          service: 'storage'
+          component: 'backend'
+
+  # LLM Observatory API Service (Production)
+  - job_name: 'llm-observatory-api'
+    scrape_interval: 10s
+    scrape_timeout: 5s
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['api:9090']
+        labels:
+          service: 'api'
+          component: 'rest-graphql'
+          environment: 'production'
+
+  # LLM Observatory API Service (Development)
+  - job_name: 'llm-observatory-api-dev'
+    scrape_interval: 10s
+    scrape_timeout: 5s
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['api-dev:9090']
+        labels:
+          service: 'api-dev'
+          component: 'rest-graphql'
+          environment: 'development'
+
+  # Grafana metrics
+  - job_name: 'grafana'
+    scrape_interval: 30s
+    static_configs:
+      - targets: ['grafana:3000']
+        labels:
+          service: 'grafana'
+          component: 'visualization'
+
+  # Jaeger metrics
+  - job_name: 'jaeger'
+    scrape_interval: 30s
+    static_configs:
+      - targets: ['jaeger:14269']
+        labels:
+          service: 'jaeger'
+          component: 'tracing'
+
+  # Loki metrics
+  - job_name: 'loki'
+    scrape_interval: 30s
+    static_configs:
+      - targets: ['loki:3100']
+        labels:
+          service: 'loki'
+          component: 'logging'
+
+  # Alertmanager metrics
+  - job_name: 'alertmanager'
+    scrape_interval: 30s
+    static_configs:
+      - targets: ['localhost:9093']
+        labels:
+          service: 'alertmanager'
+          component: 'alerting'

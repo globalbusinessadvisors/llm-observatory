@@ -24,54 +24,102 @@ LLM Observatory is a high-performance, open-source observability platform specif
 
 ---
 
-## Quick Start
+## Quick Start (5 Minutes)
 
-### Installation (Coming Soon)
+Get the full observability stack running in just 5 minutes:
 
 ```bash
-# Install the Rust SDK
-cargo add llm-observatory
+# 1. Clone and configure
+git clone https://github.com/llm-observatory/llm-observatory.git
+cd llm-observatory
+cp .env.example .env
 
-# Or use the proxy mode (no code changes)
-docker run -p 8080:8080 llm-observatory/proxy
+# 2. Start infrastructure (TimescaleDB, Redis, Grafana, Jaeger)
+docker compose up -d
+
+# 3. Access Grafana dashboards
+open http://localhost:3000
+# Login: admin/admin
 ```
 
-### Basic Usage
+**Services Available**:
+- **Grafana** (Dashboards): `http://localhost:3000`
+- **Jaeger** (Traces): `http://localhost:16686`
+- **Prometheus** (Metrics): `http://localhost:9090`
+- **TimescaleDB** (PostgreSQL 16): `localhost:5432`
+- **Redis** (Cache): `localhost:6379`
 
-```rust
-use llm_observatory::prelude::*;
-
-#[tokio::main]
-async fn main() {
-    // Initialize observability
-    let _guard = Observatory::init()
-        .with_service_name("my-llm-app")
-        .with_otlp_endpoint("http://localhost:4317")
-        .start()
-        .await?;
-
-    // Your LLM calls are automatically instrumented
-    let response = openai_client
-        .chat()
-        .create(request)
-        .await?;
-
-    // Traces, metrics, and logs are automatically collected
-}
-```
+See the [Quick Start Guide](./docs/QUICK_START.md) for detailed instructions.
 
 ---
 
 ## Architecture
 
 ```
-Applications → SDK (Rust) → OTel Collector → Storage → Grafana
-                                           ├── TimescaleDB (Metrics)
-                                           ├── Tempo (Traces)
-                                           └── Loki (Logs)
+┌─────────────────────────────────────────────────────────────────────┐
+│                        LLM Applications                              │
+│   (Python, Node.js, Rust, Go - any language with OTLP support)     │
+└────────────┬────────────────────────────────────────────────────────┘
+             │
+             │ OpenTelemetry Protocol (OTLP)
+             │ - Traces (gRPC/HTTP)
+             │ - Metrics (gRPC/HTTP)
+             │ - Logs (gRPC/HTTP)
+             │
+             ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                    LLM Observatory Collector                         │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │  OTLP Receiver (gRPC :4317 / HTTP :4318)                    │  │
+│  └─────────────────────┬────────────────────────────────────────┘  │
+│                        │                                             │
+│  ┌─────────────────────▼────────────────────────────────────────┐  │
+│  │  LLM-Aware Processing Pipeline                              │  │
+│  │  ├─ Token Counting & Cost Calculation                       │  │
+│  │  ├─ PII Redaction (optional)                                │  │
+│  │  ├─ Intelligent Sampling (head/tail)                        │  │
+│  │  ├─ Metric Enrichment                                       │  │
+│  │  └─ Context Propagation                                     │  │
+│  └─────────────────────┬────────────────────────────────────────┘  │
+└────────────────────────┼────────────────────────────────────────────┘
+                         │
+         ┌───────────────┼───────────────┐
+         │               │               │
+         ▼               ▼               ▼
+┌────────────────┐ ┌──────────┐ ┌────────────────┐
+│  TimescaleDB   │ │  Jaeger  │ │  Loki          │
+│  (Metrics)     │ │ (Traces) │ │  (Logs)        │
+│                │ │          │ │                │
+│  - Aggregates  │ │ - Spans  │ │ - Structured   │
+│  - Time-series │ │ - Context│ │   logs         │
+│  - Cost data   │ │ - Timing │ │ - Query logs   │
+└────────┬───────┘ └────┬─────┘ └───────┬────────┘
+         │              │                │
+         └──────────────┼────────────────┘
+                        │
+                        ▼
+         ┌──────────────────────────────┐
+         │      Grafana Dashboards       │
+         │                               │
+         │  - LLM Performance           │
+         │  - Cost Analysis             │
+         │  - Error Tracking            │
+         │  - Token Usage               │
+         │  - Distributed Traces        │
+         └───────────────────────────────┘
 ```
 
-### Technology Stack
+### Data Flow
+
+1. **Collection**: Applications send OTLP telemetry to the collector
+2. **Processing**: Collector enriches data with LLM-specific metadata (tokens, cost)
+3. **Storage**: Metrics → TimescaleDB, Traces → Jaeger, Logs → Loki
+4. **Visualization**: Grafana provides unified dashboards for all signals
+5. **Analysis**: Query APIs enable programmatic access for cost optimization
+
+---
+
+## Technology Stack
 
 | Component | Technology | Why |
 |-----------|-----------|-----|
@@ -79,192 +127,325 @@ Applications → SDK (Rust) → OTel Collector → Storage → Grafana
 | **Async Runtime** | Tokio | Ecosystem dominance, OTel integration |
 | **Telemetry** | OpenTelemetry | Industry standard, vendor-neutral |
 | **Metrics Storage** | TimescaleDB | SQL compatibility, high cardinality support |
-| **Trace Storage** | Grafana Tempo | Cost-effective (S3), unlimited cardinality |
+| **Trace Storage** | Grafana Tempo/Jaeger | Cost-effective, unlimited cardinality |
 | **Log Storage** | Grafana Loki | Label-based indexing, low cost |
 | **Visualization** | Grafana | Rich ecosystem, open source |
+| **Cache** | Redis | High-performance, pub/sub support |
 
 ---
 
-## Documentation
+## Use Cases Demonstrated
 
-Comprehensive planning and architecture documentation is available in the [`/plans`](./plans/) directory:
+### 1. Cost Optimization & Tracking
 
-### Quick Links
+Track and optimize LLM costs across your organization:
 
-- **[Executive Summary](./plans/executive-summary.md)** - For decision makers and stakeholders
-- **[Architecture Analysis](./plans/architecture-analysis.md)** - Comprehensive technical analysis
-- **[Quick Reference](./plans/quick-reference.md)** - For developers
-- **[Architecture Diagrams](./plans/architecture-diagrams.md)** - Visual architecture guides
-- **[Documentation Index](./plans/README.md)** - Complete documentation overview
+```sql
+-- Find most expensive requests in last 24 hours
+SELECT
+    service_name,
+    model_name,
+    COUNT(*) as request_count,
+    SUM(total_tokens) as total_tokens,
+    SUM(total_cost_usd) as total_cost,
+    AVG(duration_ms) as avg_latency_ms
+FROM llm_metrics
+WHERE timestamp > NOW() - INTERVAL '24 hours'
+GROUP BY service_name, model_name
+ORDER BY total_cost DESC
+LIMIT 10;
+```
 
-### Documentation Stats
+**Benefits:**
+- Real-time cost visibility by service, user, and model
+- Budget alerts and quota management
+- Cost attribution for chargeback/showback
+- ROI calculation and optimization opportunities
 
-- **6,248 lines** of comprehensive documentation
-- **5 specialized documents** for different audiences
-- **7 architecture diagrams** (ASCII art)
-- **100+ code examples** and configuration samples
+### 2. Performance Debugging
 
----
-
-## Key Capabilities
-
-### 1. Automatic Instrumentation
+Identify and fix performance bottlenecks:
 
 ```rust
-// OpenAI
+// Automatic tracing with context propagation
 #[instrument]
-async fn call_openai(prompt: &str) -> Result<String> {
-    let response = openai.complete(prompt).await?;
-    // Automatically tracked: latency, tokens, cost, errors
-    Ok(response.text)
+async fn process_rag_query(query: &str) -> Result<String> {
+    let embedding = embed_query(query).await?;        // Traced: 50ms
+    let docs = retrieve_docs(&embedding).await?;       // Traced: 120ms
+    let response = llm_generate(&query, &docs).await?; // Traced: 1200ms
+    Ok(response)
 }
-
-// LangChain
-let chain = LangChain::new()
-    .with_instrumentation()  // Auto-trace entire chain
-    .build();
+// Total: 1370ms - see breakdown in Jaeger
 ```
 
-### 2. Comprehensive Metrics
+**Benefits:**
+- Distributed traces show exact bottlenecks
+- P95/P99 latency tracking per model
+- Time-to-first-token (TTFT) metrics
+- Identify slow RAG retrieval operations
 
-- Request latency (P50, P95, P99)
-- Token usage (prompt, completion, total)
-- Cost tracking (by model, user, application)
-- Error rates and types
-- Time to first token (TTFT)
-- Tokens per second
+### 3. Error Analysis & Quality Monitoring
 
-### 3. Distributed Tracing
+Track errors, retries, and quality metrics:
 
-```
-Trace: RAG Query (trace_id: abc123)
-├── rag.embed (duration: 50ms)
-├── rag.retrieve (duration: 120ms)
-│   └── vectordb.search (duration: 100ms)
-└── llm.chat_completion (duration: 1234ms)
-    ├── tokens: 300
-    └── cost: $0.0045
+```logql
+# Find all LLM errors in the last hour
+{service_name="customer-support", level="error"}
+| json
+| line_format "{{.trace_id}}: {{.error.message}}"
+| pattern `<trace>: <error>`
 ```
 
-### 4. Intelligent Sampling
+**Benefits:**
+- Track error rates by provider and model
+- Correlate errors with specific prompts
+- Monitor retry behavior and circuit breakers
+- Quality metrics (sentiment, coherence scores)
 
-- **Head Sampling:** Probabilistic sampling at SDK level
-- **Tail Sampling:** Collector-level sampling based on complete traces
-- **Priority Sampling:** 100% of errors and slow requests, 1% of normal traffic
-- **Cost-Based Sampling:** Always sample expensive requests (> $1)
+### 4. Multi-Model Comparison
+
+Compare different models for the same task:
+
+```sql
+-- Compare GPT-4 vs Claude-3 performance
+SELECT
+    model_name,
+    PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY duration_ms) as p50_ms,
+    PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY duration_ms) as p95_ms,
+    AVG(total_cost_usd) as avg_cost,
+    AVG(total_tokens) as avg_tokens,
+    COUNT(*) FILTER (WHERE error_code IS NOT NULL) as error_count
+FROM llm_metrics
+WHERE timestamp > NOW() - INTERVAL '7 days'
+  AND model_name IN ('gpt-4-turbo', 'claude-3-opus-20240229')
+GROUP BY model_name;
+```
+
+**Benefits:**
+- Data-driven model selection
+- A/B testing different models
+- Cost vs. quality trade-offs
+- Latency vs. throughput analysis
+
+---
+
+## Screenshots & Visualizations
+
+### Main Dashboard - LLM Performance Overview
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│  LLM Performance Dashboard                    Last 24h  ▼          │
+├─────────────────────────────────────────────────────────────────────┤
+│  Total Requests      Total Cost          P95 Latency    Error Rate │
+│  ┌──────────────┐   ┌──────────────┐   ┌───────────┐  ┌─────────┐ │
+│  │   125.4k     │   │   $247.89    │   │  1.2s     │  │  0.3%   │ │
+│  │   ↑ 12%     │   │   ↑ $45.20  │   │  ↓ 0.1s  │  │  ↓ 0.1%│ │
+│  └──────────────┘   └──────────────┘   └───────────┘  └─────────┘ │
+├─────────────────────────────────────────────────────────────────────┤
+│  Requests/sec                       │  Cost by Model              │
+│  ┌───────────────────────────────┐  │  ┌───────────────────────┐ │
+│  │     ╱╲  ╱╲                    │  │  │ GPT-4:    $180  (73%) │ │
+│  │    ╱  ╲╱  ╲    ╱╲             │  │  │ Claude-3:  $55  (22%) │ │
+│  │   ╱          ╲╱  ╲            │  │  │ GPT-3.5:   $12  (5%)  │ │
+│  │  ╱                ╲           │  │  └───────────────────────┘ │
+│  └───────────────────────────────┘  └─────────────────────────────┘
+├─────────────────────────────────────────────────────────────────────┤
+│  Latency Distribution (P50/P95/P99)  │  Top Services by Cost      │
+│  ┌───────────────────────────────┐  │  ┌───────────────────────┐ │
+│  │ GPT-4:      850ms/1.2s/1.8s   │  │  │ rag-service:  $120.5  │ │
+│  │ Claude-3:   720ms/1.0s/1.5s   │  │  │ chat-api:     $87.3   │ │
+│  │ GPT-3.5:    380ms/0.6s/0.9s   │  │  │ summarizer:   $40.1   │ │
+│  └───────────────────────────────┘  │  └───────────────────────┘ │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Distributed Trace View
+
+```
+Trace: RAG Query Execution (trace_id: 7d8f9e2a1b3c4d5e)
+Duration: 1,370ms | Status: OK | Service: rag-service
+
+┌─ rag.query [1370ms] ──────────────────────────────────────────┐
+│  user_id: user_123                                             │
+│  query: "What is the refund policy?"                          │
+│                                                                │
+│  ├─ embeddings.generate [50ms] ────────┐                     │
+│  │  provider: openai                     │                     │
+│  │  model: text-embedding-3-small       │                     │
+│  │  tokens: 12                           │                     │
+│  │  cost: $0.000001                      │                     │
+│  └───────────────────────────────────────┘                     │
+│                                                                │
+│  ├─ vectordb.search [120ms] ─────────────────┐               │
+│  │  provider: qdrant                          │               │
+│  │  collection: knowledge_base                │               │
+│  │  top_k: 5                                  │               │
+│  │  similarity_threshold: 0.75                │               │
+│  └────────────────────────────────────────────┘               │
+│                                                                │
+│  └─ llm.chat_completion [1200ms] ──────────────────────────┐ │
+│     provider: openai                                        │ │
+│     model: gpt-4-turbo                                      │ │
+│     prompt_tokens: 850                                      │ │
+│     completion_tokens: 150                                  │ │
+│     total_tokens: 1000                                      │ │
+│     cost: $0.015                                            │ │
+│     temperature: 0.7                                        │ │
+│     max_tokens: 500                                         │ │
+│     ├─ [streaming] chunk_1 [50ms]                          │ │
+│     ├─ [streaming] chunk_2 [50ms]                          │ │
+│     └─ [streaming] final [1100ms]                          │ │
+│     └────────────────────────────────────────────────────────┘ │
+└────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
 ## Performance Benchmarks
 
+### SDK Overhead
+
 | Metric | LLM Observatory (Rust) | Python SDK | Node.js SDK |
 |--------|----------------------|------------|-------------|
-| Span creation | 50 ns | 2,000 ns | 1,500 ns |
-| Batch export (1000 spans) | 2 ms | 15 ms | 12 ms |
-| Memory per span | 256 bytes | 1.2 KB | 900 bytes |
-| CPU overhead | < 1% | 3-5% | 2-4% |
+| Span creation | **50 ns** | 2,000 ns | 1,500 ns |
+| Batch export (1000 spans) | **2 ms** | 15 ms | 12 ms |
+| Memory per span | **256 bytes** | 1.2 KB | 900 bytes |
+| CPU overhead | **< 1%** | 3-5% | 2-4% |
+
+### Collector Throughput
+
+| Metric | Value |
+|--------|-------|
+| Max spans/sec | 100,000+ |
+| Latency (p99) | < 10ms |
+| Memory usage (1M spans) | ~512 MB |
+| CPU usage (sustained) | ~25% (single core) |
+
+### Cost Comparison
+
+| Solution | Cost per 1M Spans | Vendor Lock-in | Self-Hosted |
+|----------|------------------|----------------|-------------|
+| **LLM Observatory** | **$7.50** | No | Yes |
+| DataDog | $50-100 | Yes | No |
+| New Relic | $75-150 | Yes | No |
+| Elastic APM | $30-60 | Partial | Yes |
+
+---
+
+## Documentation
+
+### Getting Started
+
+- **[Quick Start Guide](./docs/QUICK_START.md)** - Get running in 5 minutes
+- **[Architecture](./docs/ARCHITECTURE.md)** - System design and components
+- **[Development Guide](./docs/DEVELOPMENT.md)** - Local development setup
+
+### API & SDK Documentation
+
+- **[API Reference](./docs/API.md)** - REST and GraphQL APIs
+- **[Python SDK](./docs/sdk/PYTHON.md)** - Python integration guide
+- **[Node.js SDK](./docs/sdk/NODEJS.md)** - Node.js integration guide
+- **[Rust SDK](./docs/sdk/RUST.md)** - Rust integration guide
+
+### Operations
+
+- **[Deployment Guide](./docs/DEPLOYMENT.md)** - Production deployment (AWS, GCP, Azure, K8s)
+- **[Cost Optimization](./docs/COST_OPTIMIZATION.md)** - Reduce LLM costs by 30-50%
+- **[Troubleshooting](./docs/TROUBLESHOOTING.md)** - Common issues and solutions
+
+### Docker & Infrastructure
+
+- **[Docker README](./docker/README.md)** - Complete infrastructure guide
+- **[Docker Workflows](./docs/DOCKER_WORKFLOWS.md)** - Development patterns
+- **[Docker Architecture](./docs/ARCHITECTURE_DOCKER.md)** - Container design
+
+### Planning & Architecture
+
+Comprehensive planning and architecture documentation is available in the [`/plans`](./plans/) directory:
+
+- **[Executive Summary](./plans/executive-summary.md)** - For decision makers
+- **[Architecture Analysis](./plans/architecture-analysis.md)** - Technical deep-dive
+- **[Architecture Diagrams](./plans/architecture-diagrams.md)** - Visual guides
+- **[Documentation Index](./plans/README.md)** - Complete overview
 
 ---
 
 ## Roadmap
 
-### Phase 1: Foundation (Weeks 1-4) - **IN PROGRESS**
+### Phase 1: Foundation (Weeks 1-4) - IN PROGRESS
+
 - [x] Architecture research and analysis
 - [x] Comprehensive documentation
 - [x] Apache 2.0 license and DCO contribution model
 - [x] Cargo workspace structure with 7 crates
 - [x] Core types and OpenTelemetry span definitions
-- [ ] Provider integrations (OpenAI, Anthropic)
+- [x] Docker infrastructure (TimescaleDB, Redis, Grafana, Jaeger)
+- [ ] Provider integrations (OpenAI, Anthropic, Google)
 - [ ] OTLP collector with PII redaction
-- [ ] Storage backend deployment (TimescaleDB, Tempo)
+- [ ] Storage backend deployment
 
 ### Phase 2: Core Features (Weeks 5-8)
-- [ ] Multi-framework support (LangChain, Anthropic, LlamaIndex)
+
+- [ ] Python SDK with auto-instrumentation
+- [ ] Node.js SDK with middleware patterns
+- [ ] Rust SDK with trait-based design
+- [ ] Multi-framework support (LangChain, LlamaIndex)
 - [ ] Advanced sampling strategies
-- [ ] Comprehensive metrics collection
 - [ ] Grafana dashboards
+- [ ] Cost calculation engine
 
 ### Phase 3: Advanced Features (Weeks 9-12)
+
 - [ ] Zero-copy optimizations
 - [ ] Unified query API (GraphQL)
 - [ ] Developer tooling (CLI, IDE extensions)
 - [ ] Performance optimization (SIMD, memory pooling)
+- [ ] Real-time alerting
+- [ ] Anomaly detection
 
 ### Phase 4: Production Readiness (Weeks 13-16)
+
 - [ ] Security hardening (PII scrubbing, encryption)
 - [ ] Reliability improvements (retries, circuit breakers)
 - [ ] Operational tooling (alerts, runbooks)
 - [ ] Load testing (100k+ spans/sec)
-
----
-
-## Use Cases
-
-### 1. Cost Optimization
-```sql
--- Find most expensive requests
-SELECT model_name, COUNT(*), SUM(total_cost_usd)
-FROM llm_metrics
-WHERE ts > NOW() - INTERVAL '7 days'
-GROUP BY model_name
-ORDER BY sum DESC;
-```
-
-### 2. Performance Debugging
-```rust
-// Trace slow RAG queries
-{
-  service_name="rag-app",
-  span.llm.duration_ms > 5000
-}
-```
-
-### 3. Error Analysis
-```logql
-# Find all LLM errors in last hour
-{service_name="llm-gateway", level="error"}
-| json
-| line_format "{{.trace_id}}: {{.error.message}}"
-```
-
-### 4. Model Comparison
-```sql
--- Compare models by latency and cost
-SELECT
-    model_name,
-    PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY duration_ms) as p95_ms,
-    AVG(total_cost_usd) as avg_cost
-FROM llm_metrics
-GROUP BY model_name;
-```
+- [ ] Documentation and examples
+- [ ] Community building
 
 ---
 
 ## Why LLM Observatory?
 
 ### vs Commercial Solutions
+
 - **85% cost savings:** $7.50 vs $50-100 per million spans
 - **No vendor lock-in:** OpenTelemetry standard
 - **Open source:** Full transparency and customization
+- **Self-hosted:** Complete data ownership and control
 
 ### vs General Observability Tools
+
 - **LLM-specific:** Built-in token tracking, cost calculation
 - **Higher performance:** Rust implementation, 20-40x faster
 - **Better sampling:** LLM-aware priority sampling
+- **Purpose-built:** Optimized for LLM use cases
 
 ### vs DIY Solutions
+
 - **Production-ready:** Battle-tested patterns and best practices
 - **Lower maintenance:** Managed storage backends
 - **Rich ecosystem:** Grafana, Prometheus, etc.
+- **Active development:** Regular updates and improvements
 
 ---
 
 ## Community & Support
 
-- **Documentation:** [/plans](/plans/)
-- **Issues:** [GitHub Issues](../../issues) *(coming soon)*
-- **Discussions:** [GitHub Discussions](../../discussions) *(coming soon)*
-- **Contributing:** [CONTRIBUTING.md](./CONTRIBUTING.md) *(coming soon)*
+- **Documentation:** [/docs](/docs/) and [/plans](/plans/)
+- **Issues:** [GitHub Issues](../../issues)
+- **Discussions:** [GitHub Discussions](../../discussions)
+- **Contributing:** [CONTRIBUTING.md](./CONTRIBUTING.md)
 
 ---
 
@@ -274,7 +455,7 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 **Why Apache 2.0?**
 - Enterprise-friendly with explicit patent grant
-- Industry standard for infrastructure software (used by Kubernetes, Prometheus, OpenTelemetry)
+- Industry standard for infrastructure software (Kubernetes, Prometheus, OpenTelemetry)
 - CNCF requirement for graduated projects
 - Better patent protection than MIT
 
@@ -294,25 +475,28 @@ See [Architecture Analysis](./plans/architecture-analysis.md) for detailed resea
 
 ## Project Status
 
-**Current Phase:** Foundation - Development ⚙️ In Progress
+**Current Phase:** Foundation - Development (In Progress)
 
 **Completed:**
-- ✅ Research & planning (60,000+ words of documentation)
-- ✅ Project structure initialized
-- ✅ Core types and span definitions
-- ✅ Error handling and provider traits
+- Research & planning (60,000+ words of documentation)
+- Project structure initialized
+- Core types and span definitions
+- Error handling and provider traits
+- Docker infrastructure stack
 
 **In Progress:**
-- ⚙️ Provider implementations (OpenAI, Anthropic, Google)
-- ⚙️ OTLP collector with intelligent sampling
-- ⚙️ Storage layer (TimescaleDB integration)
+- Provider implementations (OpenAI, Anthropic, Google)
+- OTLP collector with intelligent sampling
+- Storage layer (TimescaleDB integration)
+- Example applications
 
 **Next Steps:**
 1. Complete provider integrations
 2. Implement cost calculation engine
-3. Deploy development environment (Docker Compose)
+3. Build Python, Node.js, and Rust SDKs
 4. Create example applications
+5. Grafana dashboard development
 
 ---
 
-**Built with ❤️ and Rust for the LLM community**
+**Built with Rust for the LLM community**

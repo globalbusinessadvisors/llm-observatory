@@ -1,0 +1,232 @@
+# =============================================================================
+# LLM Observatory Collector Configuration
+# =============================================================================
+# OpenTelemetry collector with LLM-specific processing capabilities
+# =============================================================================
+
+# Collector service configuration
+service:
+  name: "llm-observatory-collector"
+  version: "0.1.0"
+  environment: "${ENVIRONMENT:-development}"
+
+# OTLP receivers configuration
+receivers:
+  # gRPC receiver for OTLP
+  otlp_grpc:
+    endpoint: "${COLLECTOR_OTLP_GRPC_ENDPOINT:-0.0.0.0:4327}"
+    max_recv_msg_size_mib: "${OTLP_MAX_MESSAGE_SIZE:-4194304}"
+    compression: "${OTLP_COMPRESSION:-gzip}"
+    timeout: "${OTLP_TIMEOUT:-30}s"
+    tls:
+      enabled: false  # Enable in production with proper certificates
+
+  # HTTP receiver for OTLP
+  otlp_http:
+    endpoint: "${COLLECTOR_OTLP_HTTP_ENDPOINT:-0.0.0.0:4328}"
+    compression: "${OTLP_COMPRESSION:-gzip}"
+    timeout: "${OTLP_TIMEOUT:-30}s"
+    cors:
+      allowed_origins:
+        - "*"  # Restrict in production
+      allowed_headers:
+        - "Content-Type"
+        - "Authorization"
+
+# Processors configuration
+processors:
+  # Batch processor - groups data before export
+  batch:
+    batch_size: "${COLLECTOR_BATCH_SIZE:-500}"
+    timeout: "${COLLECTOR_BATCH_TIMEOUT:-10}s"
+    send_batch_max_size: 1000
+
+  # LLM enrichment processor
+  llm_enrichment:
+    enabled: "${COLLECTOR_LLM_ENRICHMENT_ENABLED:-true}"
+    # Extract and enrich LLM-specific attributes
+    extract_model_info: true
+    extract_provider_info: true
+    extract_usage_metrics: true
+    normalize_model_names: true
+
+  # Token counting processor
+  token_counting:
+    enabled: "${COLLECTOR_TOKEN_COUNTING_ENABLED:-true}"
+    # Calculate token counts for prompts and completions
+    count_prompt_tokens: true
+    count_completion_tokens: true
+    # Use approximate counting if exact tokenizer not available
+    approximate_if_missing: true
+
+  # Cost calculation processor
+  cost_calculation:
+    enabled: "${COLLECTOR_COST_CALCULATION_ENABLED:-true}"
+    # Calculate costs based on token usage and provider pricing
+    use_latest_pricing: true
+    # Fallback to default pricing if provider pricing unavailable
+    fallback_to_defaults: true
+
+  # PII redaction processor (optional)
+  pii_redaction:
+    enabled: "${COLLECTOR_PII_REDACTION_ENABLED:-false}"
+    # Redact sensitive information from traces
+    redact_emails: true
+    redact_phone_numbers: true
+    redact_credit_cards: true
+    redact_api_keys: true
+    # Custom patterns (regex)
+    custom_patterns: []
+
+  # Resource detection
+  resource_detection:
+    # Automatically detect resource attributes
+    detectors:
+      - env
+      - system
+      - docker
+    timeout: 5s
+
+  # Memory limiter - prevents OOM
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+# Exporters configuration
+exporters:
+  # Storage service exporter
+  storage:
+    endpoint: "${STORAGE_SERVICE_URL:-http://storage:8081}"
+    timeout: 30s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+
+  # Database exporter (direct writes)
+  database:
+    connection_url: "${DATABASE_URL}"
+    pool_size: "${DB_POOL_MAX_SIZE:-20}"
+    timeout: 30s
+    batch_size: "${COLLECTOR_BATCH_SIZE:-500}"
+
+  # Metrics exporter (Prometheus)
+  prometheus:
+    endpoint: "${COLLECTOR_METRICS_ENDPOINT:-0.0.0.0:9091}"
+    namespace: "llm_observatory"
+    const_labels:
+      service: "collector"
+
+  # Debug exporter (development only)
+  debug:
+    enabled: false
+    verbosity: detailed
+    sampling_initial: 5
+    sampling_thereafter: 200
+
+# Processing pipeline
+pipeline:
+  traces:
+    receivers:
+      - otlp_grpc
+      - otlp_http
+    processors:
+      - memory_limiter
+      - resource_detection
+      - llm_enrichment
+      - token_counting
+      - cost_calculation
+      - pii_redaction
+      - batch
+    exporters:
+      - storage
+      - database
+
+  metrics:
+    receivers:
+      - otlp_grpc
+      - otlp_http
+    processors:
+      - memory_limiter
+      - resource_detection
+      - batch
+    exporters:
+      - storage
+      - prometheus
+
+  logs:
+    receivers:
+      - otlp_grpc
+      - otlp_http
+    processors:
+      - memory_limiter
+      - resource_detection
+      - batch
+    exporters:
+      - storage
+
+# Queue configuration
+queue:
+  # In-memory queue settings
+  enabled: true
+  num_consumers: "${COLLECTOR_NUM_WORKERS:-4}"
+  queue_size: "${COLLECTOR_MAX_QUEUE_SIZE:-10000}"
+
+# Health check configuration
+health_check:
+  endpoint: "${COLLECTOR_HEALTH_ENDPOINT:-0.0.0.0:8082}"
+  path: "/health"
+  check_collector_pipeline: true
+
+# Logging configuration
+logging:
+  level: "${COLLECTOR_LOG_LEVEL:-info}"
+  format: "${COLLECTOR_LOG_FORMAT:-json}"
+  output: "stdout"
+  sampling:
+    enabled: true
+    initial: 100
+    thereafter: 100
+
+# Telemetry configuration (collector's own telemetry)
+telemetry:
+  # Internal metrics
+  metrics:
+    enabled: "${METRICS_ENABLED:-true}"
+    address: "${COLLECTOR_METRICS_ENDPOINT:-0.0.0.0:9091}"
+    level: detailed
+
+  # Internal traces (collector's own traces)
+  traces:
+    enabled: false  # Enable for debugging collector itself
+
+# Performance tuning
+performance:
+  # Worker pool configuration
+  num_workers: "${COLLECTOR_NUM_WORKERS:-4}"
+
+  # Compression
+  compression:
+    enabled: true
+    algorithm: "gzip"
+    level: 6
+
+  # Connection limits
+  max_connections: 100
+  max_idle_connections: 10
+  idle_timeout: "5m"
+
+# Feature flags
+features:
+  # Enable experimental features
+  llm_enrichment: "${COLLECTOR_LLM_ENRICHMENT_ENABLED:-true}"
+  token_counting: "${COLLECTOR_TOKEN_COUNTING_ENABLED:-true}"
+  cost_calculation: "${COLLECTOR_COST_CALCULATION_ENABLED:-true}"
+  pii_redaction: "${COLLECTOR_PII_REDACTION_ENABLED:-false}"
+
+  # Additional features
+  automatic_sampling: true
+  tail_sampling: false
+  adaptive_sampling: false

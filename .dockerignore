@@ -1,0 +1,117 @@
+# Build artifacts
+target/
+**/target/
+*.so
+*.dylib
+*.dll
+
+# Cargo lock for libraries (keep for binaries)
+# Cargo.lock
+
+# Git
+.git/
+.github/
+.gitignore
+.gitattributes
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+.claude-flow/
+
+# Documentation
+docs/
+*.md
+!README.md
+LICENSE
+NOTICE
+CONTRIBUTING.md
+
+# Plans and development files
+plans/
+todo.txt
+notes.txt
+
+# Test artifacts
+coverage/
+*.profraw
+*.profdata
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+azure-pipelines.yml
+
+# Docker files (we'll copy them explicitly)
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Node modules (if any JS tooling)
+node_modules/
+package-lock.json
+
+# Python (if any Python tooling)
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Development scripts
+scripts/dev/
+scripts/test/
+
+# Benchmarks
+benches/results/
+criterion/
+
+# Database files
+*.db
+*.sqlite
+*.db-shm
+*.db-wal
+
+# Redis dump
+dump.rdb
+
+# Archives
+*.tar
+*.gz
+*.zip
+*.7z
+
+# Large media files
+*.mp4
+*.avi
+*.mov
+*.wmv

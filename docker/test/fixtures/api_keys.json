@@ -1,0 +1,64 @@
+[
+  {
+    "id": "00000000-0000-0000-0000-000000000201",
+    "key": "test_key_1_abc123def456",
+    "key_hash": "sha256:test_key_hash_1",
+    "name": "Test API Key 1",
+    "project_id": "00000000-0000-0000-0000-000000000101",
+    "permissions": ["read", "write", "admin"],
+    "is_active": true,
+    "expires_days": 365
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000000202",
+    "key": "test_key_2_xyz789ghi012",
+    "key_hash": "sha256:test_key_hash_2",
+    "name": "Test API Key 2",
+    "project_id": "00000000-0000-0000-0000-000000000102",
+    "permissions": ["read", "write"],
+    "is_active": true,
+    "expires_days": 365
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000000203",
+    "key": "test_readonly_key_jkl345mno678",
+    "key_hash": "sha256:test_key_hash_3",
+    "name": "Read-Only API Key",
+    "project_id": "00000000-0000-0000-0000-000000000101",
+    "permissions": ["read"],
+    "is_active": true,
+    "expires_days": 90
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000000204",
+    "key": "test_expired_key_pqr901stu234",
+    "key_hash": "sha256:test_key_hash_4",
+    "name": "Expired API Key",
+    "project_id": "00000000-0000-0000-0000-000000000101",
+    "permissions": ["read", "write"],
+    "is_active": true,
+    "expires_days": -30,
+    "description": "Expired key for testing expiration handling"
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000000205",
+    "key": "test_inactive_key_vwx567yz890",
+    "key_hash": "sha256:test_key_hash_5",
+    "name": "Inactive API Key",
+    "project_id": "00000000-0000-0000-0000-000000000102",
+    "permissions": ["read", "write"],
+    "is_active": false,
+    "expires_days": 365,
+    "description": "Inactive key for testing revocation"
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000000206",
+    "key": "test_dev_key_abc123xyz789",
+    "key_hash": "sha256:test_key_hash_6",
+    "name": "Development API Key",
+    "project_id": "00000000-0000-0000-0000-000000000104",
+    "permissions": ["read", "write", "delete"],
+    "is_active": true,
+    "expires_days": 30
+  }
+]

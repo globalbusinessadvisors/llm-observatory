@@ -1,0 +1,343 @@
+# ============================================================================
+# LLM Observatory - API Service Configuration
+# ============================================================================
+#
+# This file contains the configuration for the LLM Observatory API service.
+# It supports both REST and GraphQL endpoints with authentication, rate
+# limiting, and comprehensive security features.
+#
+# ============================================================================
+
+# Server Configuration
+server:
+  host: 0.0.0.0
+  port: 8080
+  # Request timeout in seconds
+  request_timeout: 30
+  # Maximum request body size (in bytes)
+  max_body_size: 10485760  # 10MB
+  # Enable graceful shutdown
+  graceful_shutdown_timeout: 30
+
+# Metrics Configuration
+metrics:
+  enabled: true
+  port: 9090
+  # Metrics endpoint path
+  path: /metrics
+  # Include system metrics
+  include_system: true
+
+# Health Check Configuration
+health:
+  enabled: true
+  # Health check endpoint path
+  path: /health
+  # Readiness endpoint path
+  readiness_path: /ready
+  # Liveness endpoint path
+  liveness_path: /alive
+
+# REST API Configuration
+rest:
+  enabled: true
+  # Base path for REST API
+  base_path: /api/v1
+  # Enable OpenAPI/Swagger documentation
+  openapi_enabled: false  # Disabled in production
+  openapi_path: /api/docs
+
+# GraphQL Configuration
+graphql:
+  enabled: true
+  # GraphQL endpoint path
+  path: /graphql
+  # Enable GraphQL playground (development only)
+  playground_enabled: false
+  playground_path: /graphql/playground
+  # Enable introspection (development only)
+  introspection_enabled: false
+  # Query complexity limits
+  max_depth: 10
+  max_complexity: 1000
+  # Query timeout in seconds
+  timeout: 30
+
+# Authentication Configuration
+authentication:
+  # JWT configuration
+  jwt:
+    # Algorithm: HS256, HS384, HS512, RS256, RS384, RS512
+    algorithm: HS256
+    # Token expiration in seconds (1 hour)
+    expiration: 3600
+    # Refresh token expiration in seconds (7 days)
+    refresh_expiration: 604800
+    # Issuer
+    issuer: llm-observatory
+    # Audience
+    audience: llm-observatory-api
+
+  # API Key authentication
+  api_key:
+    enabled: true
+    # Header name for API key
+    header_name: X-API-Key
+    # Cache API keys in Redis for faster lookups
+    cache_enabled: true
+    cache_ttl: 3600
+
+  # OAuth2 configuration (optional)
+  oauth2:
+    enabled: false
+    providers: []
+
+# Authorization Configuration
+authorization:
+  # Role-based access control
+  rbac:
+    enabled: true
+    # Default role for new users
+    default_role: viewer
+
+  # Permission model
+  permissions:
+    # Allow listing permissions for authenticated users
+    list_for_user: true
+
+# CORS Configuration
+cors:
+  # Allowed origins (use "*" for development only)
+  allowed_origins:
+    - http://localhost:3000
+    - http://localhost:8080
+  # Allowed methods
+  allowed_methods:
+    - GET
+    - POST
+    - PUT
+    - DELETE
+    - PATCH
+    - OPTIONS
+  # Allowed headers
+  allowed_headers:
+    - Content-Type
+    - Authorization
+    - X-API-Key
+    - X-Request-ID
+  # Exposed headers
+  exposed_headers:
+    - X-Request-ID
+    - X-RateLimit-Limit
+    - X-RateLimit-Remaining
+    - X-RateLimit-Reset
+  # Allow credentials
+  allow_credentials: true
+  # Max age in seconds
+  max_age: 3600
+
+# Rate Limiting Configuration
+rate_limiting:
+  enabled: true
+  # Default limits
+  default:
+    # Requests per window
+    requests: 100
+    # Window duration in seconds
+    window: 60
+
+  # Per-endpoint limits (override default)
+  endpoints:
+    /api/v1/traces:
+      requests: 1000
+      window: 60
+    /api/v1/metrics:
+      requests: 1000
+      window: 60
+    /graphql:
+      requests: 100
+      window: 60
+
+  # Per-role limits
+  roles:
+    admin:
+      requests: 10000
+      window: 60
+    developer:
+      requests: 1000
+      window: 60
+    viewer:
+      requests: 100
+      window: 60
+
+  # Storage backend for rate limiting
+  storage: redis
+
+  # Response headers
+  include_headers: true
+
+# Caching Configuration
+caching:
+  enabled: true
+  # Default TTL in seconds
+  default_ttl: 3600
+  # Cache key prefix
+  key_prefix: "llm-observatory:api:"
+
+  # Cache strategies per endpoint
+  strategies:
+    /api/v1/traces:
+      enabled: true
+      ttl: 300  # 5 minutes
+    /api/v1/metrics:
+      enabled: true
+      ttl: 60   # 1 minute
+    /api/v1/models:
+      enabled: true
+      ttl: 3600 # 1 hour
+
+# Logging Configuration
+logging:
+  # Log level: trace, debug, info, warn, error
+  level: info
+  # Log format: json, pretty
+  format: json
+  # Include request/response logging
+  log_requests: true
+  # Include sensitive data (disable in production)
+  log_sensitive: false
+  # Include stack traces
+  log_traces: true
+
+# Tracing Configuration
+tracing:
+  enabled: true
+  # OpenTelemetry configuration
+  otlp:
+    # OTLP endpoint
+    endpoint: http://jaeger:4317
+    # Enable TLS
+    tls_enabled: false
+    # Sampling rate (0.0 to 1.0)
+    sampling_rate: 0.1
+
+  # Trace context propagation
+  propagation:
+    - tracecontext
+    - baggage
+
+# Error Handling Configuration
+error_handling:
+  # Include error details in response (disable in production)
+  include_details: false
+  # Include stack traces (disable in production)
+  include_traces: false
+  # Include request ID in error responses
+  include_request_id: true
+  # Sentry integration (optional)
+  sentry:
+    enabled: false
+    # Sentry DSN (set via environment variable)
+    # dsn: ${SENTRY_DSN}
+    # Environment
+    environment: production
+    # Release version
+    # release: ${VERSION}
+
+# Database Configuration
+database:
+  # Connection pool settings
+  pool:
+    min_size: 5
+    max_size: 20
+    # Connection timeout in seconds
+    timeout: 30
+    # Idle timeout in seconds
+    idle_timeout: 600
+
+  # Query settings
+  query:
+    # Enable query logging
+    log_queries: false
+    # Slow query threshold in milliseconds
+    slow_query_threshold: 1000
+
+  # Read-only mode (API uses read-only user)
+  read_only: true
+
+# Redis Configuration
+redis:
+  # Connection pool settings
+  pool:
+    min_size: 2
+    max_size: 10
+    # Connection timeout in seconds
+    timeout: 5
+
+# Security Configuration
+security:
+  # Enable security headers
+  headers:
+    enabled: true
+    # Strict-Transport-Security
+    hsts: true
+    hsts_max_age: 31536000
+    # X-Frame-Options
+    frame_options: DENY
+    # X-Content-Type-Options
+    content_type_options: nosniff
+    # X-XSS-Protection
+    xss_protection: "1; mode=block"
+    # Referrer-Policy
+    referrer_policy: strict-origin-when-cross-origin
+    # Content-Security-Policy
+    csp: "default-src 'self'"
+
+  # Request ID
+  request_id:
+    enabled: true
+    header_name: X-Request-ID
+
+  # CSRF protection
+  csrf:
+    enabled: false  # Not needed for API-only service
+
+  # IP whitelisting/blacklisting
+  ip_filtering:
+    enabled: false
+    whitelist: []
+    blacklist: []
+
+# Feature Flags
+features:
+  # Enable experimental features
+  experimental:
+    enabled: false
+
+  # Enable beta features
+  beta:
+    enabled: false
+
+  # Feature-specific flags
+  flags:
+    graphql_subscriptions: false
+    batch_operations: true
+    async_processing: true
+
+# Pagination Configuration
+pagination:
+  # Default page size
+  default_page_size: 20
+  # Maximum page size
+  max_page_size: 100
+  # Include total count in response
+  include_total: true
+
+# Validation Configuration
+validation:
+  # Enable strict validation
+  strict: true
+  # Maximum string length
+  max_string_length: 10000
+  # Maximum array length
+  max_array_length: 1000

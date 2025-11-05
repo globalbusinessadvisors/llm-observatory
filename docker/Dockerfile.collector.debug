@@ -1,0 +1,99 @@
+# Multi-stage Dockerfile for LLM Observatory Collector (Debug Build)
+# This Dockerfile builds the collector service with debug symbols and debugging tools
+
+# =============================================================================
+# Stage 1: Builder
+# =============================================================================
+FROM rust:1.75-slim as builder
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    libpq-dev \
+    protobuf-compiler \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /usr/src/app
+
+# Copy workspace files
+COPY Cargo.toml Cargo.lock ./
+COPY crates ./crates
+
+# Build argument for profile (default: release-with-debug)
+ARG PROFILE=release-with-debug
+
+# Build the collector with debug symbols
+RUN cargo build --profile=${PROFILE} --bin llm-observatory-collector
+
+# =============================================================================
+# Stage 2: Runtime with Debug Tools
+# =============================================================================
+FROM debian:bookworm-slim
+
+# Install runtime dependencies and debugging tools
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    libssl3 \
+    libpq5 \
+    # Debugging tools
+    gdb \
+    lldb \
+    strace \
+    ltrace \
+    curl \
+    procps \
+    net-tools \
+    vim \
+    less \
+    # PostgreSQL client for debugging
+    postgresql-client \
+    # Redis client for debugging
+    redis-tools \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create app user
+RUN useradd -m -u 1000 app && \
+    mkdir -p /usr/local/bin /debug && \
+    chown -R app:app /debug
+
+# Copy the built binary
+ARG PROFILE=release-with-debug
+COPY --from=builder /usr/src/app/target/${PROFILE}/llm-observatory-collector /usr/local/bin/
+
+# Set permissions
+RUN chmod +x /usr/local/bin/llm-observatory-collector
+
+# Create directory for core dumps
+RUN mkdir -p /var/crash && chown app:app /var/crash
+
+# Set core dump pattern
+RUN echo '/var/crash/core.%e.%p.%t' > /proc/sys/kernel/core_pattern || true
+
+# Switch to app user
+USER app
+
+# Expose ports
+EXPOSE 8081 9091 2345 9999
+
+# Set working directory
+WORKDIR /app
+
+# Environment variables for debugging
+ENV RUST_BACKTRACE=full \
+    RUST_LOG=debug \
+    DEBUG=true
+
+# Health check
+HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:8081/health || exit 1
+
+# Default command (can be overridden for debugging)
+CMD ["/usr/local/bin/llm-observatory-collector"]
+
+# Alternative entrypoint for lldb-server debugging:
+# CMD ["lldb-server", "platform", "--listen", "*:2345", "--server", "/usr/local/bin/llm-observatory-collector"]
+
+# Alternative entrypoint for gdbserver debugging:
+# CMD ["gdbserver", "0.0.0.0:9999", "/usr/local/bin/llm-observatory-collector"]

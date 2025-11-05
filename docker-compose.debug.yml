@@ -1,0 +1,310 @@
+# Docker Compose Debug Configuration for LLM Observatory
+# This file extends docker-compose.yml with debugging support
+#
+# Usage:
+#   docker-compose -f docker-compose.yml -f docker-compose.debug.yml up --build
+#
+# Features:
+# - Services built with debug symbols
+# - Debug ports exposed for remote debugging
+# - Verbose logging enabled
+# - Source maps and symbols preserved
+# - Development tools included
+
+version: '3.8'
+
+services:
+  # =========================================================================
+  # Collector Service - Debug Mode
+  # =========================================================================
+  collector:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.collector.debug
+      args:
+        PROFILE: release-with-debug
+        RUST_VERSION: "1.75.0"
+    container_name: llm-observatory-collector-debug
+    restart: unless-stopped
+    ports:
+      # Application port
+      - "${COLLECTOR_PORT:-8081}:8081"
+      # Metrics port
+      - "${COLLECTOR_METRICS_PORT:-9091}:9091"
+      # Debug port for LLDB remote debugging
+      - "2345:2345"
+      # Alternative: GDB remote debugging
+      - "9999:9999"
+    environment:
+      # Application config
+      RUST_LOG: ${RUST_LOG:-debug}
+      RUST_BACKTRACE: ${RUST_BACKTRACE:-full}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+
+      # Database connection
+      DATABASE_URL: postgresql://${DB_APP_USER:-llm_observatory_app}:${DB_APP_PASSWORD:-change_me_in_production}@timescaledb:5432/${DB_NAME:-llm_observatory}
+      DB_POOL_MIN_SIZE: ${DB_POOL_MIN_SIZE:-5}
+      DB_POOL_MAX_SIZE: ${DB_POOL_MAX_SIZE:-20}
+      DB_POOL_TIMEOUT: ${DB_POOL_TIMEOUT:-30}
+
+      # Redis connection
+      REDIS_URL: redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/${REDIS_DB:-0}
+
+      # Server settings
+      APP_HOST: ${APP_HOST:-0.0.0.0}
+      APP_PORT: ${COLLECTOR_PORT:-8081}
+      METRICS_PORT: ${COLLECTOR_METRICS_PORT:-9091}
+
+      # Debug settings
+      DEBUG: "true"
+      DB_QUERY_LOGGING: "true"
+
+      # Performance profiling
+      TOKIO_CONSOLE: "true"
+
+    volumes:
+      # Mount source code for hot-reload (optional)
+      - ./crates:/usr/src/app/crates:ro
+      - ./Cargo.toml:/usr/src/app/Cargo.toml:ro
+      - ./Cargo.lock:/usr/src/app/Cargo.lock:ro
+      # Debug symbols and core dumps
+      - collector_debug:/debug
+    networks:
+      - llm-observatory-network
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    # Enable core dumps for crash debugging
+    ulimits:
+      core: -1
+    # Set security options for debugging (less restrictive)
+    security_opt:
+      - seccomp:unconfined
+      - apparmor:unconfined
+    # Enable ptrace for debugger attachment
+    cap_add:
+      - SYS_PTRACE
+    # Command to run with debugger support
+    command: ["/usr/local/bin/llm-observatory-collector"]
+    # Alternative: Start with lldb-server for remote debugging
+    # command: ["lldb-server", "platform", "--listen", "*:2345", "--server", "/usr/local/bin/llm-observatory-collector"]
+
+  # =========================================================================
+  # API Service - Debug Mode
+  # =========================================================================
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api.debug
+      args:
+        PROFILE: release-with-debug
+        RUST_VERSION: "1.75.0"
+    container_name: llm-observatory-api-debug
+    restart: unless-stopped
+    ports:
+      # Application port
+      - "${API_PORT:-8080}:8080"
+      # Metrics port
+      - "${API_METRICS_PORT:-9090}:9090"
+      # Debug port for LLDB remote debugging
+      - "2346:2346"
+      # Alternative: GDB remote debugging
+      - "9998:9998"
+    environment:
+      # Application config
+      RUST_LOG: ${RUST_LOG:-debug}
+      RUST_BACKTRACE: ${RUST_BACKTRACE:-full}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+
+      # Database connection
+      DATABASE_URL: postgresql://${DB_APP_USER:-llm_observatory_app}:${DB_APP_PASSWORD:-change_me_in_production}@timescaledb:5432/${DB_NAME:-llm_observatory}
+      DB_POOL_MIN_SIZE: ${DB_POOL_MIN_SIZE:-5}
+      DB_POOL_MAX_SIZE: ${DB_POOL_MAX_SIZE:-20}
+
+      # Redis connection
+      REDIS_URL: redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/${REDIS_DB:-0}
+
+      # Server settings
+      APP_HOST: ${APP_HOST:-0.0.0.0}
+      APP_PORT: ${API_PORT:-8080}
+      METRICS_PORT: ${API_METRICS_PORT:-9090}
+
+      # Security settings
+      SECRET_KEY: ${SECRET_KEY:-change_me_to_a_random_secret_key_in_production}
+      JWT_SECRET: ${JWT_SECRET:-change_me_to_a_random_jwt_secret}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:8080}
+
+      # Debug settings
+      DEBUG: "true"
+      DB_QUERY_LOGGING: "true"
+
+      # Performance profiling
+      TOKIO_CONSOLE: "true"
+
+    volumes:
+      # Mount source code for hot-reload (optional)
+      - ./crates:/usr/src/app/crates:ro
+      - ./Cargo.toml:/usr/src/app/Cargo.toml:ro
+      - ./Cargo.lock:/usr/src/app/Cargo.lock:ro
+      # Debug symbols and core dumps
+      - api_debug:/debug
+    networks:
+      - llm-observatory-network
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    # Enable core dumps for crash debugging
+    ulimits:
+      core: -1
+    # Set security options for debugging (less restrictive)
+    security_opt:
+      - seccomp:unconfined
+      - apparmor:unconfined
+    # Enable ptrace for debugger attachment
+    cap_add:
+      - SYS_PTRACE
+    command: ["/usr/local/bin/llm-observatory-api"]
+
+  # =========================================================================
+  # TimescaleDB - Debug Mode (verbose logging)
+  # =========================================================================
+  timescaledb:
+    environment:
+      # Enable detailed logging for debugging
+      POSTGRES_LOG_STATEMENT: all
+      POSTGRES_LOG_MIN_DURATION_STATEMENT: 0
+      POSTGRES_LOG_CONNECTIONS: "on"
+      POSTGRES_LOG_DISCONNECTIONS: "on"
+      POSTGRES_LOG_DURATION: "on"
+      POSTGRES_LOG_LINE_PREFIX: "%m [%p] %q%u@%d "
+    command: >
+      postgres
+      -c shared_preload_libraries=timescaledb
+      -c max_connections=200
+      -c log_statement=all
+      -c log_duration=on
+      -c log_min_duration_statement=0
+      -c log_connections=on
+      -c log_disconnections=on
+      -c log_line_prefix='%m [%p] %q%u@%d '
+      -c log_timezone='UTC'
+      -c log_error_verbosity=verbose
+
+  # =========================================================================
+  # Redis - Debug Mode (verbose logging)
+  # =========================================================================
+  redis:
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD:-redis_password}
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+      --appendfsync everysec
+      --loglevel debug
+      --save ""
+
+  # =========================================================================
+  # Grafana - Debug Mode
+  # =========================================================================
+  grafana:
+    environment:
+      # Enable debug logging
+      GF_LOG_LEVEL: debug
+      GF_LOG_MODE: console
+      # Enable development mode
+      GF_SERVER_DEV_MODE: "true"
+      # Enable profiling endpoint
+      GF_PROFILE_ENABLED: "true"
+
+  # =========================================================================
+  # Debug Tools Container (Optional)
+  # =========================================================================
+  debug-tools:
+    image: rust:1.75-slim
+    container_name: llm-observatory-debug-tools
+    volumes:
+      - ./:/workspace:rw
+      - cargo_cache:/usr/local/cargo/registry
+      - target_cache:/workspace/target
+    networks:
+      - llm-observatory-network
+    working_dir: /workspace
+    command: ["sleep", "infinity"]
+    environment:
+      RUST_LOG: debug
+      RUST_BACKTRACE: full
+    profiles:
+      - debug-tools
+    # Install debugging tools on startup
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        apt-get update && apt-get install -y \
+          gdb \
+          lldb \
+          valgrind \
+          strace \
+          ltrace \
+          curl \
+          postgresql-client \
+          redis-tools \
+          netcat-openbsd \
+          vim \
+          less
+        echo "Debug tools container ready"
+        sleep infinity
+
+  # =========================================================================
+  # Performance Monitoring with Tokio Console
+  # =========================================================================
+  tokio-console:
+    image: tokio-console
+    container_name: llm-observatory-tokio-console
+    build:
+      context: docker/tokio-console
+      dockerfile: Dockerfile
+    ports:
+      - "6669:6669"
+    networks:
+      - llm-observatory-network
+    profiles:
+      - tokio-console
+    command: ["tokio-console", "--listen", "0.0.0.0:6669"]
+
+# =========================================================================
+# Networks
+# =========================================================================
+networks:
+  llm-observatory-network:
+    driver: bridge
+    name: llm-observatory-network
+
+# =========================================================================
+# Volumes
+# =========================================================================
+volumes:
+  collector_debug:
+    name: llm-observatory-collector-debug
+  api_debug:
+    name: llm-observatory-api-debug
+  cargo_cache:
+    name: llm-observatory-cargo-cache
+  target_cache:
+    name: llm-observatory-target-cache

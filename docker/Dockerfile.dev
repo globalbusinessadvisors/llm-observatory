@@ -1,0 +1,155 @@
+# Development Dockerfile with hot reload support
+# Optimized for fast iteration with cargo-watch
+
+# Use official Rust image with full toolchain
+FROM rust:1.75-slim-bookworm as base
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    libpq-dev \
+    curl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install cargo-watch for hot reload
+RUN cargo install cargo-watch --version 8.5.1
+
+# Create app directory
+WORKDIR /app
+
+# =============================================================================
+# Development stage with hot reload
+# =============================================================================
+FROM base as development
+
+# Accept build arguments for service configuration
+ARG SERVICE_NAME
+ARG SERVICE_PATH
+
+# Environment variables for better cargo behavior in containers
+ENV CARGO_HOME=/usr/local/cargo
+ENV CARGO_TARGET_DIR=/app/target
+ENV CARGO_INCREMENTAL=1
+ENV CARGO_NET_RETRY=10
+ENV RUST_BACKTRACE=1
+
+# Copy workspace configuration first (for dependency caching)
+COPY Cargo.toml Cargo.lock ./
+
+# Create all crate directories to satisfy workspace
+RUN mkdir -p crates/core \
+    crates/collector \
+    crates/storage \
+    crates/api \
+    crates/sdk \
+    crates/providers \
+    crates/cli
+
+# Copy all Cargo.toml files for dependency resolution
+COPY crates/core/Cargo.toml ./crates/core/
+COPY crates/collector/Cargo.toml ./crates/collector/
+COPY crates/storage/Cargo.toml ./crates/storage/
+COPY crates/api/Cargo.toml ./crates/api/
+COPY crates/sdk/Cargo.toml ./crates/sdk/
+COPY crates/providers/Cargo.toml ./crates/providers/
+COPY crates/cli/Cargo.toml ./crates/cli/
+
+# Create dummy source files to build dependencies
+RUN for crate in core collector storage api sdk providers cli; do \
+        mkdir -p crates/$crate/src && \
+        echo "fn main() {}" > crates/$crate/src/main.rs && \
+        echo "pub fn dummy() {}" > crates/$crate/src/lib.rs; \
+    done
+
+# Build dependencies in debug mode (this layer will be cached)
+RUN cargo build --workspace
+
+# Remove dummy source files
+RUN rm -rf crates/*/src
+
+# Copy actual source code (these will be mounted as volumes in dev)
+COPY crates ./crates
+
+# Expose default ports (can be overridden in docker-compose)
+EXPOSE 4317 4318 8080 8081 9090
+
+# Health check script
+RUN echo '#!/bin/sh\n\
+curl -f http://localhost:9090/health 2>/dev/null || \
+curl -f http://localhost:8080/health 2>/dev/null || \
+curl -f http://localhost:8081/health 2>/dev/null || \
+exit 0' > /healthcheck.sh && chmod +x /healthcheck.sh
+
+# Set the service binary name from build arg
+ENV SERVICE_BIN=${SERVICE_NAME}
+ENV SERVICE_PATH=${SERVICE_PATH}
+
+# Use cargo-watch for hot reload with optimized settings
+# - Clear screen on each rebuild for better visibility
+# - Watch both Cargo.toml and source files
+# - Use --why to show what triggered the rebuild
+# - Delay 0.5s to batch multiple file changes
+# - Use --no-gitignore to watch all files in mounted volumes
+CMD cargo watch \
+    --watch crates \
+    --watch Cargo.toml \
+    --watch Cargo.lock \
+    --clear \
+    --why \
+    --delay 0.5 \
+    --no-gitignore \
+    --exec "run --bin ${SERVICE_BIN}"
+
+# =============================================================================
+# Builder stage for production builds (if needed)
+# =============================================================================
+FROM base as builder
+
+ARG SERVICE_NAME
+ARG SERVICE_PATH
+
+# Copy workspace files
+COPY Cargo.toml Cargo.lock ./
+COPY crates ./crates
+
+# Build in release mode with optimizations
+RUN cargo build --release --bin ${SERVICE_NAME}
+
+# =============================================================================
+# Production runtime stage
+# =============================================================================
+FROM debian:bookworm-slim as production
+
+ARG SERVICE_NAME
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    libssl3 \
+    libpq5 \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user
+RUN useradd -m -u 1000 -s /bin/bash appuser
+
+# Create app directory
+WORKDIR /app
+
+# Copy binary from builder
+COPY --from=builder /app/target/release/${SERVICE_NAME} /usr/local/bin/app
+
+# Change ownership
+RUN chown -R appuser:appuser /app
+
+# Switch to non-root user
+USER appuser
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:9090/health || curl -f http://localhost:8080/health || exit 1
+
+# Run the application
+CMD ["/usr/local/bin/app"]
