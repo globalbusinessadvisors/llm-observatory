@@ -80,7 +80,7 @@ Configuration Files:
   ✓ pytest.ini                            - Pytest configuration
   ✓ playwright.config.ts                  - Playwright configuration
   ✓ requirements.txt                      - Python dependencies
-  ✓ docker-compose.test.yml               - Test environment Docker Compose
+  ✓ docker/compose/docker-compose.test.yml               - Test environment Docker Compose
 
 Test Utilities:
   ✓ utils/__init__.py                     - Package marker
@@ -200,9 +200,9 @@ Features:
   - Multiple test runners
 
 Usage:
-  docker-compose -f docker-compose.test.yml up -d
-  docker-compose -f docker-compose.test.yml exec test-runner pytest tests/
-  docker-compose -f docker-compose.test.yml down -v
+  docker-compose -f docker/compose/docker-compose.test.yml up -d
+  docker-compose -f docker/compose/docker-compose.test.yml exec test-runner pytest tests/
+  docker-compose -f docker/compose/docker-compose.test.yml down -v
 
 ================================================================================
 TEST EXECUTION EXAMPLES
@@ -363,7 +363,7 @@ Directory Structure:
   scripts/
   └── run-integration-tests.sh             (universal runner)
 
-  docker-compose.test.yml                  (test environment)
+  docker/compose/docker-compose.test.yml                  (test environment)
   TESTS_SUMMARY.md                         (detailed report)
   TESTING_QUICK_START.md                   (quick guide)
   TESTS_CREATED.txt                        (this file)

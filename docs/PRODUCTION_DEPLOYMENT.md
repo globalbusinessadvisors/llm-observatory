@@ -668,7 +668,7 @@ vault kv get -field=password secret/llm-observatory/db > secrets/db_password.txt
 
 ### Option 3: Docker Secrets (Development/Testing)
 
-Already configured in `docker-compose.prod.yml`.
+Already configured in `docker/compose/docker-compose.prod.yml`.
 
 ## SSL/TLS Configuration
 
@@ -909,7 +909,7 @@ sed -i 's/api.observatory.yourdomain.com/api.'"$YOUR_DOMAIN"'/g' docker/nginx/co
 cd /opt/llm-observatory
 
 # Copy production environment template
-cp .env.production.example .env.production
+cp docker/.env.production.example .env.production
 
 # Edit configuration
 nano .env.production
@@ -944,7 +944,7 @@ nproc
 docker run --rm hello-world
 
 # Validate docker-compose configuration
-docker compose -f docker-compose.prod.yml config
+docker compose -f docker/compose/docker-compose.prod.yml config
 
 # Check for port conflicts
 sudo netstat -tlnp | grep -E ':(80|443|5432|6379|3000|8080)'
@@ -957,13 +957,13 @@ sudo netstat -tlnp | grep -E ':(80|443|5432|6379|3000|8080)'
 export $(cat .env.production | xargs)
 
 # Pull images
-docker compose -f docker-compose.prod.yml pull
+docker compose -f docker/compose/docker-compose.prod.yml pull
 
 # Build custom images (if any)
-docker compose -f docker-compose.prod.yml build --no-cache
+docker compose -f docker/compose/docker-compose.prod.yml build --no-cache
 
 # Start infrastructure services first
-docker compose -f docker-compose.prod.yml up -d timescaledb-primary redis-master
+docker compose -f docker/compose/docker-compose.prod.yml up -d timescaledb-primary redis-master
 
 # Wait for services to be healthy
 until docker exec llm-observatory-db-primary pg_isready -U postgres; do
@@ -972,15 +972,15 @@ until docker exec llm-observatory-db-primary pg_isready -U postgres; do
 done
 
 # Run database migrations
-docker compose -f docker-compose.prod.yml run --rm api-server \
+docker compose -f docker/compose/docker-compose.prod.yml run --rm api-server \
   /app/bin/migrate up
 
 # Start remaining services
-docker compose -f docker-compose.prod.yml up -d
+docker compose -f docker/compose/docker-compose.prod.yml up -d
 
 # Check status
-docker compose -f docker-compose.prod.yml ps
-docker compose -f docker-compose.prod.yml logs -f
+docker compose -f docker/compose/docker-compose.prod.yml ps
+docker compose -f docker/compose/docker-compose.prod.yml logs -f
 ```
 
 ### 4. Start with High Availability
@@ -988,7 +988,7 @@ docker compose -f docker-compose.prod.yml logs -f
 To enable read replicas and Redis Sentinel:
 
 ```bash
-docker compose -f docker-compose.prod.yml --profile with-replica --profile with-ha up -d
+docker compose -f docker/compose/docker-compose.prod.yml --profile with-replica --profile with-ha up -d
 ```
 
 ## Post-Deployment Verification
@@ -997,7 +997,7 @@ docker compose -f docker-compose.prod.yml --profile with-replica --profile with-
 
 ```bash
 # Check all containers are running
-docker compose -f docker-compose.prod.yml ps
+docker compose -f docker/compose/docker-compose.prod.yml ps
 
 # Check health status
 docker ps --format "table {{.Names}}\t{{.Status}}"
@@ -1063,7 +1063,7 @@ curl -X POST \
 
 ```bash
 # Run manual backup
-docker compose -f docker-compose.prod.yml --profile backup run --rm backup
+docker compose -f docker/compose/docker-compose.prod.yml --profile backup run --rm backup
 
 # Verify backup was created
 ls -lh /var/lib/llm-observatory/backups/
@@ -1084,7 +1084,7 @@ docker compose -f docker/monitoring-stack.yml up -d
 
 # Configure Grafana alerts
 docker cp docker/grafana/alerting/*.yaml llm-observatory-grafana:/etc/grafana/provisioning/alerting/
-docker compose -f docker-compose.prod.yml restart grafana
+docker compose -f docker/compose/docker-compose.prod.yml restart grafana
 ```
 
 ## Scaling
@@ -1106,7 +1106,7 @@ DB_EFFECTIVE_CACHE_SIZE=24GB
 Restart services:
 
 ```bash
-docker compose -f docker-compose.prod.yml restart timescaledb-primary
+docker compose -f docker/compose/docker-compose.prod.yml restart timescaledb-primary
 ```
 
 ### Horizontal Scaling
@@ -1115,17 +1115,17 @@ docker compose -f docker-compose.prod.yml restart timescaledb-primary
 
 ```bash
 # Scale to 4 replicas
-docker compose -f docker-compose.prod.yml up -d --scale api-server=4
+docker compose -f docker/compose/docker-compose.prod.yml up -d --scale api-server=4
 
 # Verify
-docker compose -f docker-compose.prod.yml ps api-server
+docker compose -f docker/compose/docker-compose.prod.yml ps api-server
 ```
 
 **Enable read replicas:**
 
 ```bash
 # Start with replica profile
-docker compose -f docker-compose.prod.yml --profile with-replica up -d
+docker compose -f docker/compose/docker-compose.prod.yml --profile with-replica up -d
 
 # Configure application to use read replica for queries
 # Edit application configuration to use timescaledb-replica:5432 for read operations
@@ -1139,7 +1139,7 @@ See [BACKUP_INFRASTRUCTURE.md](./BACKUP_INFRASTRUCTURE.md) for complete backup d
 
 ```bash
 # Manual backup
-docker compose -f docker-compose.prod.yml --profile backup run --rm backup
+docker compose -f docker/compose/docker-compose.prod.yml --profile backup run --rm backup
 
 # Automated backups via cron
 crontab -e
@@ -1149,17 +1149,17 @@ Add:
 
 ```cron
 # Daily backup at 2 AM
-0 2 * * * cd /opt/llm-observatory && docker compose -f docker-compose.prod.yml --profile backup run --rm backup >> /var/log/llm-obs-backup.log 2>&1
+0 2 * * * cd /opt/llm-observatory && docker compose -f docker/compose/docker-compose.prod.yml --profile backup run --rm backup >> /var/log/llm-obs-backup.log 2>&1
 
 # Weekly full backup (Sunday 3 AM)
-0 3 * * 0 cd /opt/llm-observatory && docker compose -f docker-compose.prod.yml --profile backup run --rm backup --full >> /var/log/llm-obs-backup.log 2>&1
+0 3 * * 0 cd /opt/llm-observatory && docker compose -f docker/compose/docker-compose.prod.yml --profile backup run --rm backup --full >> /var/log/llm-obs-backup.log 2>&1
 ```
 
 **Restore from Backup:**
 
 ```bash
 # Stop services
-docker compose -f docker-compose.prod.yml stop api-server collector
+docker compose -f docker/compose/docker-compose.prod.yml stop api-server collector
 
 # Restore database
 docker exec llm-observatory-db-primary pg_restore \
@@ -1169,7 +1169,7 @@ docker exec llm-observatory-db-primary pg_restore \
   /backups/llm_observatory_20250105_020000.dump
 
 # Start services
-docker compose -f docker-compose.prod.yml start api-server collector
+docker compose -f docker/compose/docker-compose.prod.yml start api-server collector
 ```
 
 ## Maintenance
@@ -1178,16 +1178,16 @@ docker compose -f docker-compose.prod.yml start api-server collector
 
 ```bash
 # Pull latest images
-docker compose -f docker-compose.prod.yml pull
+docker compose -f docker/compose/docker-compose.prod.yml pull
 
 # Update services one at a time
-docker compose -f docker-compose.prod.yml up -d --no-deps api-server
+docker compose -f docker/compose/docker-compose.prod.yml up -d --no-deps api-server
 
 # Verify health
-docker compose -f docker-compose.prod.yml ps api-server
+docker compose -f docker/compose/docker-compose.prod.yml ps api-server
 
 # Update remaining services
-docker compose -f docker-compose.prod.yml up -d
+docker compose -f docker/compose/docker-compose.prod.yml up -d
 ```
 
 ### Database Maintenance
@@ -1205,16 +1205,16 @@ docker exec llm-observatory-db-primary psql -U postgres -c "SELECT pg_database.d
 
 ### Log Rotation
 
-Docker logs are automatically rotated based on configuration in `docker-compose.prod.yml`.
+Docker logs are automatically rotated based on configuration in `docker/compose/docker-compose.prod.yml`.
 
 **Manual log management:**
 
 ```bash
 # View log sizes
-docker compose -f docker-compose.prod.yml ps -q | xargs -I {} docker inspect --format='{{.Name}} {{.LogPath}}' {} | xargs -I {} sh -c 'echo {}; du -h $(echo {} | awk "{print \$2}")'
+docker compose -f docker/compose/docker-compose.prod.yml ps -q | xargs -I {} docker inspect --format='{{.Name}} {{.LogPath}}' {} | xargs -I {} sh -c 'echo {}; du -h $(echo {} | awk "{print \$2}")'
 
 # Truncate logs (if needed)
-docker compose -f docker-compose.prod.yml ps -q | xargs -I {} sh -c 'truncate -s 0 $(docker inspect --format="{{.LogPath}}" {})'
+docker compose -f docker/compose/docker-compose.prod.yml ps -q | xargs -I {} sh -c 'truncate -s 0 $(docker inspect --format="{{.LogPath}}" {})'
 ```
 
 ## Troubleshooting
@@ -1276,11 +1276,11 @@ docker exec llm-observatory-nginx cat /var/log/nginx/error.log | grep "limiting 
 
 ```bash
 # Enable debug logging
-docker compose -f docker-compose.prod.yml stop api-server
-docker compose -f docker-compose.prod.yml run --rm -e RUST_LOG=debug -e LOG_LEVEL=debug api-server
+docker compose -f docker/compose/docker-compose.prod.yml stop api-server
+docker compose -f docker/compose/docker-compose.prod.yml run --rm -e RUST_LOG=debug -e LOG_LEVEL=debug api-server
 
 # View all logs
-docker compose -f docker-compose.prod.yml logs -f --tail=100
+docker compose -f docker/compose/docker-compose.prod.yml logs -f --tail=100
 ```
 
 ### Performance Profiling

@@ -25,10 +25,10 @@ docker compose up -d timescaledb redis
 
 ```bash
 # Production mode
-docker compose -f docker-compose.yml -f docker-compose.app.yml up -d collector
+docker compose -f docker-compose.yml -f docker/compose/docker-compose.app.yml up -d collector
 
 # OR Development mode (with hot reload)
-docker compose -f docker-compose.yml -f docker-compose.app.yml --profile dev up -d collector-dev
+docker compose -f docker-compose.yml -f docker/compose/docker-compose.app.yml --profile dev up -d collector-dev
 ```
 
 ### Step 4: Verify
@@ -153,7 +153,7 @@ COLLECTOR_COST_CALCULATION_ENABLED=true
 
 Restart after changes:
 ```bash
-docker compose -f docker-compose.app.yml restart collector
+docker compose -f docker/compose/docker-compose.app.yml restart collector
 ```
 
 ## Troubleshooting
@@ -166,14 +166,14 @@ sudo lsof -i :4327
 
 # Use different ports
 export COLLECTOR_OTLP_GRPC_PORT=4427
-docker compose -f docker-compose.app.yml up -d collector
+docker compose -f docker/compose/docker-compose.app.yml up -d collector
 ```
 
 ### Container Won't Start
 
 ```bash
 # Check logs
-docker compose -f docker-compose.app.yml logs collector
+docker compose -f docker/compose/docker-compose.app.yml logs collector
 
 # Check dependencies
 docker compose ps timescaledb redis
@@ -186,7 +186,7 @@ docker compose ps timescaledb redis
 curl http://localhost:8082/health
 
 # Check logs for errors
-docker compose -f docker-compose.app.yml logs collector | grep -i error
+docker compose -f docker/compose/docker-compose.app.yml logs collector | grep -i error
 
 # Send test trace
 make -f docker/Makefile.collector test-http

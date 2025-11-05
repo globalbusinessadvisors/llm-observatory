@@ -199,22 +199,22 @@ For isolated testing with all dependencies:
 
 ```bash
 # Start test environment
-docker-compose -f docker-compose.test.yml up -d
+docker-compose -f docker/compose/docker-compose.test.yml up -d
 
 # Run integration tests
-docker-compose -f docker-compose.test.yml exec test-runner \
+docker-compose -f docker/compose/docker-compose.test.yml exec test-runner \
   python -m pytest tests/integration -v
 
 # Run E2E tests
-docker-compose -f docker-compose.test.yml exec playwright-runner \
+docker-compose -f docker/compose/docker-compose.test.yml exec playwright-runner \
   npx playwright test
 
 # Run load tests
-docker-compose -f docker-compose.test.yml exec k6-runner \
+docker-compose -f docker/compose/docker-compose.test.yml exec k6-runner \
   k6 run tests/load/chat-api.js
 
 # Stop test environment
-docker-compose -f docker-compose.test.yml down -v
+docker-compose -f docker/compose/docker-compose.test.yml down -v
 ```
 
 ## Test Coverage
@@ -522,13 +522,13 @@ stages: [
 
 Check logs:
 ```bash
-docker-compose -f docker-compose.test.yml logs -f
+docker-compose -f docker/compose/docker-compose.test.yml logs -f
 ```
 
 Clean up and restart:
 ```bash
-docker-compose -f docker-compose.test.yml down -v
-docker-compose -f docker-compose.test.yml up -d
+docker-compose -f docker/compose/docker-compose.test.yml down -v
+docker-compose -f docker/compose/docker-compose.test.yml up -d
 ```
 
 ## Contributing

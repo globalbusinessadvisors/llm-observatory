@@ -76,23 +76,23 @@ docker build -f docker/Dockerfile.collector.dev -t llm-observatory/collector:dev
 
 ```bash
 # Start all services including collector
-docker compose -f docker-compose.yml -f docker-compose.app.yml up -d
+docker compose -f docker-compose.yml -f docker/compose/docker-compose.app.yml up -d
 
 # Start only collector and dependencies
-docker compose -f docker-compose.yml -f docker-compose.app.yml up -d collector
+docker compose -f docker-compose.yml -f docker/compose/docker-compose.app.yml up -d collector
 
 # View logs
-docker compose -f docker-compose.yml -f docker-compose.app.yml logs -f collector
+docker compose -f docker-compose.yml -f docker/compose/docker-compose.app.yml logs -f collector
 ```
 
 ### Development Mode
 
 ```bash
 # Start with hot reload enabled
-docker compose -f docker-compose.yml -f docker-compose.app.yml --profile dev up -d collector-dev
+docker compose -f docker-compose.yml -f docker/compose/docker-compose.app.yml --profile dev up -d collector-dev
 
 # View logs with detailed output
-docker compose -f docker-compose.yml -f docker-compose.app.yml logs -f collector-dev
+docker compose -f docker-compose.yml -f docker/compose/docker-compose.app.yml logs -f collector-dev
 ```
 
 ## Port Configuration
@@ -230,10 +230,10 @@ curl http://localhost:8082/health
 
 ```bash
 # Check container health
-docker compose -f docker-compose.app.yml ps collector
+docker compose -f docker/compose/docker-compose.app.yml ps collector
 
 # Manually trigger health check
-docker compose -f docker-compose.app.yml exec collector /usr/local/bin/collector health-check
+docker compose -f docker/compose/docker-compose.app.yml exec collector /usr/local/bin/collector health-check
 ```
 
 ## Metrics
@@ -288,7 +288,7 @@ curl -X POST http://localhost:4328/v1/traces \
 
 ```bash
 # Check logs
-docker compose -f docker-compose.app.yml logs collector | grep "processed"
+docker compose -f docker/compose/docker-compose.app.yml logs collector | grep "processed"
 
 # Check metrics
 curl -s http://localhost:9091/metrics | grep spans_processed
@@ -300,7 +300,7 @@ curl -s http://localhost:9091/metrics | grep spans_processed
 
 ```bash
 # Check logs
-docker compose -f docker-compose.app.yml logs collector
+docker compose -f docker/compose/docker-compose.app.yml logs collector
 
 # Common issues:
 # 1. Database not ready - wait for health check
@@ -339,11 +339,11 @@ DB_POOL_MAX_SIZE=50
 
 ```bash
 # Verify network
-docker compose -f docker-compose.app.yml exec collector ping storage
-docker compose -f docker-compose.app.yml exec collector ping timescaledb
+docker compose -f docker/compose/docker-compose.app.yml exec collector ping storage
+docker compose -f docker/compose/docker-compose.app.yml exec collector ping timescaledb
 
 # Check service dependencies
-docker compose -f docker-compose.app.yml ps
+docker compose -f docker/compose/docker-compose.app.yml ps
 ```
 
 ## Security Best Practices
@@ -430,11 +430,11 @@ Configure alerts in `docker/prometheus/alerts/collector_alerts.yml`
 
 ```bash
 # Start dev container
-docker compose -f docker-compose.app.yml --profile dev up collector-dev
+docker compose -f docker/compose/docker-compose.app.yml --profile dev up collector-dev
 
 # Changes to source files trigger automatic rebuild
 # View rebuild logs
-docker compose -f docker-compose.app.yml logs -f collector-dev
+docker compose -f docker/compose/docker-compose.app.yml logs -f collector-dev
 ```
 
 ### Debugging

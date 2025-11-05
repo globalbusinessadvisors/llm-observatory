@@ -89,7 +89,7 @@ echo "Checking configuration files..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 check_file "docker-compose.yml" "Production docker-compose.yml"
-check_file "docker-compose.dev.yml" "Development docker-compose.dev.yml"
+check_file "docker/compose/docker-compose.dev.yml" "Development docker/compose/docker-compose.dev.yml"
 check_file ".dockerignore" ".dockerignore file"
 check_file ".env.example" "Environment template"
 check_file "Makefile" "Makefile"
@@ -152,20 +152,20 @@ check_dir "crates/api" "API crate"
 check_dir "crates/storage" "Storage crate"
 
 echo ""
-echo "Validating docker-compose.dev.yml..."
+echo "Validating docker/compose/docker-compose.dev.yml..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-if docker compose -f docker-compose.yml -f docker-compose.dev.yml config &> /dev/null; then
-    echo -e "${GREEN}✓${NC} docker-compose.dev.yml is valid"
+if docker compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml config &> /dev/null; then
+    echo -e "${GREEN}✓${NC} docker/compose/docker-compose.dev.yml is valid"
     ((PASSED++))
 else
-    echo -e "${RED}✗${NC} docker-compose.dev.yml has syntax errors"
+    echo -e "${RED}✗${NC} docker/compose/docker-compose.dev.yml has syntax errors"
     ((FAILED++))
 fi
 
-# Check for required services in docker-compose.dev.yml
+# Check for required services in docker/compose/docker-compose.dev.yml
 for service in collector api storage dev-utils; do
-    if grep -q "^  $service:" docker-compose.dev.yml; then
+    if grep -q "^  $service:" docker/compose/docker-compose.dev.yml; then
         echo -e "${GREEN}✓${NC} Service '$service' configured"
         ((PASSED++))
     else
@@ -176,7 +176,7 @@ done
 
 # Check for required volumes
 for volume in cargo_registry cargo_git collector_target api_target storage_target; do
-    if grep -q "$volume:" docker-compose.dev.yml; then
+    if grep -q "$volume:" docker/compose/docker-compose.dev.yml; then
         echo -e "${GREEN}✓${NC} Volume '$volume' configured"
         ((PASSED++))
     else

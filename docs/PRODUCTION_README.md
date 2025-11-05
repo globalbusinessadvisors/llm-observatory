@@ -148,7 +148,7 @@ cd llm-observatory
 ### 3. Configure Environment
 
 ```bash
-cp .env.production.example .env.production
+cp docker/.env.production.example .env.production
 nano .env.production  # Update domain, SMTP, S3 settings
 ```
 
@@ -170,10 +170,10 @@ sudo cp /etc/letsencrypt/live/observatory.yourdomain.com/privkey.pem docker/cert
 sudo mkdir -p /var/lib/llm-observatory/{timescaledb-primary,redis-master,grafana,backups}
 
 # Start services
-docker compose -f docker-compose.prod.yml up -d
+docker compose -f docker/compose/docker-compose.prod.yml up -d
 
 # Verify
-docker compose -f docker-compose.prod.yml ps
+docker compose -f docker/compose/docker-compose.prod.yml ps
 ```
 
 ### 6. Access
@@ -188,7 +188,7 @@ docker compose -f docker-compose.prod.yml ps
 
 ### Docker Compose
 
-- **[docker-compose.prod.yml](docker-compose.prod.yml)**: Main production configuration
+- **[docker/compose/docker-compose.prod.yml](docker/compose/docker-compose.prod.yml)**: Main production configuration
   - Services: PostgreSQL, Redis, Grafana, API, Nginx
   - Profiles: `with-replica`, `with-ha`, `backup`
   - Security: Non-root users, read-only filesystems, secrets
@@ -196,7 +196,7 @@ docker compose -f docker-compose.prod.yml ps
 
 ### Environment Variables
 
-- **[.env.production.example](.env.production.example)**: Production environment template
+- **[docker/.env.production.example](docker/.env.production.example)**: Production environment template
   - Database, Redis, application settings
   - Security, monitoring, backup configuration
   - All secrets use external secret management
@@ -223,7 +223,7 @@ docker compose -f docker-compose.prod.yml ps
 Single primary database, single Redis instance, multiple API replicas:
 
 ```bash
-docker compose -f docker-compose.prod.yml up -d
+docker compose -f docker/compose/docker-compose.prod.yml up -d
 ```
 
 ### High Availability
@@ -231,7 +231,7 @@ docker compose -f docker-compose.prod.yml up -d
 Add read replica and Redis Sentinel:
 
 ```bash
-docker compose -f docker-compose.prod.yml --profile with-replica --profile with-ha up -d
+docker compose -f docker/compose/docker-compose.prod.yml --profile with-replica --profile with-ha up -d
 ```
 
 ### With Backups
@@ -239,7 +239,7 @@ docker compose -f docker-compose.prod.yml --profile with-replica --profile with-
 Enable automated backup service:
 
 ```bash
-docker compose -f docker-compose.prod.yml --profile backup up -d
+docker compose -f docker/compose/docker-compose.prod.yml --profile backup up -d
 ```
 
 ## Scaling
@@ -254,7 +254,7 @@ DB_SHARED_BUFFERS=16GB  # For 64GB RAM server
 DB_EFFECTIVE_CACHE_SIZE=48GB
 
 # Restart database
-docker compose -f docker-compose.prod.yml restart timescaledb-primary
+docker compose -f docker/compose/docker-compose.prod.yml restart timescaledb-primary
 ```
 
 ### Horizontal Scaling
@@ -262,13 +262,13 @@ docker compose -f docker-compose.prod.yml restart timescaledb-primary
 Scale API servers:
 
 ```bash
-docker compose -f docker-compose.prod.yml up -d --scale api-server=4
+docker compose -f docker/compose/docker-compose.prod.yml up -d --scale api-server=4
 ```
 
 Add read replicas:
 
 ```bash
-docker compose -f docker-compose.prod.yml --profile with-replica up -d
+docker compose -f docker/compose/docker-compose.prod.yml --profile with-replica up -d
 ```
 
 **Detailed Guide**: [Scaling Guide](docs/SCALING_GUIDE.md)
@@ -279,10 +279,10 @@ docker compose -f docker-compose.prod.yml --profile with-replica up -d
 
 ```bash
 # Check service health
-docker compose -f docker-compose.prod.yml ps
+docker compose -f docker/compose/docker-compose.prod.yml ps
 
 # View logs
-docker compose -f docker-compose.prod.yml logs -f --tail=100
+docker compose -f docker/compose/docker-compose.prod.yml logs -f --tail=100
 
 # Check resource usage
 docker stats
@@ -292,20 +292,20 @@ docker stats
 
 ```bash
 # Manual backup
-docker compose -f docker-compose.prod.yml --profile backup run --rm backup
+docker compose -f docker/compose/docker-compose.prod.yml --profile backup run --rm backup
 
 # Automated backups (cron)
-0 2 * * * cd /opt/llm-observatory && docker compose -f docker-compose.prod.yml --profile backup run --rm backup
+0 2 * * * cd /opt/llm-observatory && docker compose -f docker/compose/docker-compose.prod.yml --profile backup run --rm backup
 ```
 
 ### Updates
 
 ```bash
 # Pull latest images
-docker compose -f docker-compose.prod.yml pull
+docker compose -f docker/compose/docker-compose.prod.yml pull
 
 # Rolling update
-docker compose -f docker-compose.prod.yml up -d --no-deps --build api-server
+docker compose -f docker/compose/docker-compose.prod.yml up -d --no-deps --build api-server
 ```
 
 ### Monitoring
@@ -343,7 +343,7 @@ Secrets are stored in `secrets/` directory or external secret managers:
 ./scripts/rotate-secrets.sh
 
 # Update services
-docker compose -f docker-compose.prod.yml restart
+docker compose -f docker/compose/docker-compose.prod.yml restart
 ```
 
 **Detailed Guide**: [Secrets Management](docs/SECRETS_MANAGEMENT.md)
@@ -401,14 +401,14 @@ Configure alerts in Grafana:
 
 ```bash
 # Check logs
-docker compose -f docker-compose.prod.yml logs
+docker compose -f docker/compose/docker-compose.prod.yml logs
 
 # Check resources
 docker stats
 df -h
 
 # Verify configuration
-docker compose -f docker-compose.prod.yml config
+docker compose -f docker/compose/docker-compose.prod.yml config
 ```
 
 ### Database Connection Failed

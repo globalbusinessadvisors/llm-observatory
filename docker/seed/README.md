@@ -18,7 +18,7 @@ psql -h localhost -U postgres -d llm_observatory < docker/seed/seed.sql
 
 From within the dev-utils container:
 ```bash
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml run --rm dev-utils sh -c "psql < /seed-data/seed.sql"
+docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml run --rm dev-utils sh -c "psql < /seed-data/seed.sql"
 ```
 
 ### Resetting the Database
@@ -30,7 +30,7 @@ psql -h localhost -U postgres -d llm_observatory < docker/seed/reset.sql
 
 From within the dev-utils container:
 ```bash
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml run --rm dev-utils sh -c "psql < /seed-data/reset.sql"
+docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml run --rm dev-utils sh -c "psql < /seed-data/reset.sql"
 ```
 
 ### Reset and Reseed
@@ -42,7 +42,7 @@ psql -h localhost -U postgres -d llm_observatory < docker/seed/reset.sql
 psql -h localhost -U postgres -d llm_observatory < docker/seed/seed.sql
 
 # From container
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml run --rm dev-utils sh -c "psql < /seed-data/reset.sql && psql < /seed-data/seed.sql"
+docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml run --rm dev-utils sh -c "psql < /seed-data/reset.sql && psql < /seed-data/seed.sql"
 ```
 
 ## Sample Data

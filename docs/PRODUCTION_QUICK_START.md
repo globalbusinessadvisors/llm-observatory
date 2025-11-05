@@ -145,7 +145,7 @@ cp docker/certs/nginx/server.crt docker/certs/nginx/ca.crt
 
 ```bash
 # Copy template
-cp .env.production.example .env.production
+cp docker/.env.production.example .env.production
 
 # Edit configuration
 nano .env.production
@@ -230,10 +230,10 @@ export YOUR_DOMAIN="observatory.yourdomain.com"
 export $(cat .env.production | xargs)
 
 # Pull images
-docker compose -f docker-compose.prod.yml pull
+docker compose -f docker/compose/docker-compose.prod.yml pull
 
 # Start infrastructure services
-docker compose -f docker-compose.prod.yml up -d timescaledb-primary redis-master
+docker compose -f docker/compose/docker-compose.prod.yml up -d timescaledb-primary redis-master
 
 # Wait for database (about 30 seconds)
 echo "Waiting for database to be ready..."
@@ -244,10 +244,10 @@ done
 echo " Ready!"
 
 # Start application services
-docker compose -f docker-compose.prod.yml up -d
+docker compose -f docker/compose/docker-compose.prod.yml up -d
 
 # Check status
-docker compose -f docker-compose.prod.yml ps
+docker compose -f docker/compose/docker-compose.prod.yml ps
 ```
 
 ## 10. Verify Deployment (5 minutes)
@@ -270,7 +270,7 @@ curl -k https://api.observatory.yourdomain.com/health
 curl -k https://observatory.yourdomain.com/api/health
 
 # View logs
-docker compose -f docker-compose.prod.yml logs -f --tail=50
+docker compose -f docker/compose/docker-compose.prod.yml logs -f --tail=50
 ```
 
 ## 11. Access Services
@@ -289,7 +289,7 @@ docker compose -f docker-compose.prod.yml logs -f --tail=50
 
 ```bash
 # Test manual backup
-docker compose -f docker-compose.prod.yml --profile backup run --rm backup
+docker compose -f docker/compose/docker-compose.prod.yml --profile backup run --rm backup
 
 # Verify backup created
 ls -lh /var/lib/llm-observatory/backups/
@@ -302,7 +302,7 @@ Add:
 
 ```cron
 # Daily backup at 2 AM
-0 2 * * * cd /opt/llm-observatory && docker compose -f docker-compose.prod.yml --profile backup run --rm backup >> /var/log/llm-obs-backup.log 2>&1
+0 2 * * * cd /opt/llm-observatory && docker compose -f docker/compose/docker-compose.prod.yml --profile backup run --rm backup >> /var/log/llm-obs-backup.log 2>&1
 ```
 
 ## 13. Configure Firewall (3 minutes)
@@ -376,7 +376,7 @@ echo "Login at: https://observatory.yourdomain.com"
 
 ```bash
 # Check logs
-docker compose -f docker-compose.prod.yml logs
+docker compose -f docker/compose/docker-compose.prod.yml logs
 
 # Check resources
 docker stats
@@ -384,7 +384,7 @@ df -h
 free -h
 
 # Restart services
-docker compose -f docker-compose.prod.yml restart
+docker compose -f docker/compose/docker-compose.prod.yml restart
 ```
 
 ### Cannot access via HTTPS
@@ -427,25 +427,25 @@ cat secrets/database_url.txt
 
 ```bash
 # View all services
-docker compose -f docker-compose.prod.yml ps
+docker compose -f docker/compose/docker-compose.prod.yml ps
 
 # View logs
-docker compose -f docker-compose.prod.yml logs -f
+docker compose -f docker/compose/docker-compose.prod.yml logs -f
 
 # Restart service
-docker compose -f docker-compose.prod.yml restart api-server
+docker compose -f docker/compose/docker-compose.prod.yml restart api-server
 
 # Stop all services
-docker compose -f docker-compose.prod.yml down
+docker compose -f docker/compose/docker-compose.prod.yml down
 
 # Start all services
-docker compose -f docker-compose.prod.yml up -d
+docker compose -f docker/compose/docker-compose.prod.yml up -d
 
 # Scale API servers
-docker compose -f docker-compose.prod.yml up -d --scale api-server=4
+docker compose -f docker/compose/docker-compose.prod.yml up -d --scale api-server=4
 
 # Manual backup
-docker compose -f docker-compose.prod.yml --profile backup run --rm backup
+docker compose -f docker/compose/docker-compose.prod.yml --profile backup run --rm backup
 
 # Database shell
 docker exec -it llm-observatory-db-primary psql -U postgres -d llm_observatory
@@ -457,8 +457,8 @@ docker exec -it llm-observatory-redis-master redis-cli -a "$(cat secrets/redis_p
 docker stats
 
 # Update services
-docker compose -f docker-compose.prod.yml pull
-docker compose -f docker-compose.prod.yml up -d
+docker compose -f docker/compose/docker-compose.prod.yml pull
+docker compose -f docker/compose/docker-compose.prod.yml up -d
 ```
 
 ## Security Hardening Checklist

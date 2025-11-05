@@ -45,7 +45,7 @@ cp .env.example .env
 make dev-start
 
 # OR using docker-compose directly
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml up
 
 # OR using the helper script
 ./scripts/dev.sh start
@@ -192,7 +192,7 @@ echo "// test change" >> crates/api/src/main.rs
 # 1. Use sccache for distributed compilation cache
 docker-compose exec api cargo install sccache
 
-# 2. Add to docker-compose.dev.yml environment:
+# 2. Add to docker/compose/docker-compose.dev.yml environment:
 RUSTC_WRAPPER: sccache
 SCCACHE_DIR: /cache/sccache
 
@@ -213,7 +213,7 @@ make dev-seed
 ./scripts/dev.sh seed
 
 # Using docker-compose
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml run --rm dev-utils sh -c "psql < /seed-data/seed.sql"
+docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml run --rm dev-utils sh -c "psql < /seed-data/seed.sql"
 ```
 
 Sample data includes:
@@ -232,7 +232,7 @@ make dev-reset
 ./scripts/dev.sh reset
 
 # Manual reset
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml run --rm dev-utils sh -c "psql < /seed-data/reset.sql"
+docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml run --rm dev-utils sh -c "psql < /seed-data/reset.sql"
 ```
 
 ### Database Shell Access
@@ -242,7 +242,7 @@ docker-compose -f docker-compose.yml -f docker-compose.dev.yml run --rm dev-util
 make db-shell
 
 # Using docker-compose
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml exec timescaledb psql -U postgres -d llm_observatory
+docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml exec timescaledb psql -U postgres -d llm_observatory
 ```
 
 ### Sample Queries
@@ -382,10 +382,10 @@ psql -h timescaledb -U postgres -d llm_observatory < /app/docker/seed/custom-mig
 Start specific services:
 ```bash
 # Only start infrastructure and API
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml up timescaledb redis api
+docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml up timescaledb redis api
 
 # Or use profiles
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml up --scale collector=0 --scale storage=0
+docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml up --scale collector=0 --scale storage=0
 ```
 
 ## Testing
@@ -402,18 +402,18 @@ make dev-test-collector
 make dev-test-storage
 
 # With verbose output
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml exec api cargo test -- --nocapture
+docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml exec api cargo test -- --nocapture
 ```
 
 ### Integration Testing
 
 ```bash
 # Run integration tests
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml exec api cargo test --test integration_tests
+docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml exec api cargo test --test integration_tests
 
 # With database fixture
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml run --rm dev-utils sh -c "psql < /seed-data/reset.sql && psql < /seed-data/seed.sql"
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml exec api cargo test --test integration_tests
+docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml run --rm dev-utils sh -c "psql < /seed-data/reset.sql && psql < /seed-data/seed.sql"
+docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml exec api cargo test --test integration_tests
 ```
 
 ### Manual API Testing
@@ -489,7 +489,7 @@ The development environment is pre-optimized for fast iteration:
 
 ```bash
 # Time a rebuild
-time docker-compose -f docker-compose.yml -f docker-compose.dev.yml exec api cargo build
+time docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml exec api cargo build
 
 # Watch rebuild times in logs
 make dev-logs-api | grep "Finished dev"
@@ -525,7 +525,7 @@ docker stats llm-observatory-api-dev
    iostat -x 1
 
    # If slow, consider using tmpfs for target directory (Linux only)
-   # Add to docker-compose.dev.yml:
+   # Add to docker/compose/docker-compose.dev.yml:
    tmpfs:
      - /app/target:size=2G
    ```
@@ -569,18 +569,18 @@ make dev-logs
 
 **Verify cargo-watch is running:**
 ```bash
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml logs api | grep "cargo watch"
+docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml logs api | grep "cargo watch"
 ```
 
 **Check file mounts:**
 ```bash
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml exec api ls -la /app/crates
+docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml exec api ls -la /app/crates
 ```
 
 **Verify changes are saved:**
 ```bash
 # Check file timestamp
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml exec api stat /app/crates/api/src/main.rs
+docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml exec api stat /app/crates/api/src/main.rs
 ```
 
 ### Slow Rebuilds
@@ -606,12 +606,12 @@ make dev-rebuild
 
 **Check database is running:**
 ```bash
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml ps timescaledb
+docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml ps timescaledb
 ```
 
 **Check database health:**
 ```bash
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml exec timescaledb pg_isready -U postgres
+docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml exec timescaledb pg_isready -U postgres
 ```
 
 **View database logs:**
@@ -636,7 +636,7 @@ docker stats
 **Reduce concurrent services:**
 ```bash
 # Start only essential services
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml up timescaledb redis api
+docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml up timescaledb redis api
 ```
 
 ## Additional Resources

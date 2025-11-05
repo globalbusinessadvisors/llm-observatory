@@ -6,7 +6,7 @@ The complete development environment with hot reload has been successfully confi
 
 ### 1. Docker Development Configuration
 
-#### `/workspaces/llm-observatory/docker-compose.dev.yml`
+#### `/workspaces/llm-observatory/docker/compose/docker-compose.dev.yml`
 Complete development override with:
 - Hot reload for all Rust services (Collector, API, Storage)
 - cargo-watch integration for 2-3 second reload times
@@ -49,7 +49,7 @@ Optimized build context excluding:
 - Test artifacts (coverage/, *.profdata)
 - Environment files (.env, .env.*)
 - IDE files (.vscode/, .idea/)
-- CI/CD files (.github/, .gitlab-ci.yml)
+- CI/CD files (.github/, .ci/.gitlab-ci.yml)
 
 ### 4. Database Seed Data
 
@@ -302,7 +302,7 @@ lsof -i :8080
 make dev-reset
 
 # Check database health
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml exec timescaledb pg_isready
+docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml exec timescaledb pg_isready
 ```
 
 ### Hot Reload Not Working
@@ -311,7 +311,7 @@ docker-compose -f docker-compose.yml -f docker-compose.dev.yml exec timescaledb 
 make dev-logs-api | grep "cargo watch"
 
 # Verify mounts
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml exec api ls /app/crates
+docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml exec api ls /app/crates
 ```
 
 ## Validation
@@ -360,7 +360,7 @@ This checks:
 
 ```
 .dockerignore                          (1.2 KB)  - Build context optimization
-docker-compose.dev.yml                 (9.3 KB)  - Development environment
+docker/compose/docker-compose.dev.yml                 (9.3 KB)  - Development environment
 docker/Dockerfile.dev                  (4.5 KB)  - Development Dockerfile
 docker/seed/seed.sql                   (11 KB)   - Sample data
 docker/seed/reset.sql                  (989 B)   - Database reset

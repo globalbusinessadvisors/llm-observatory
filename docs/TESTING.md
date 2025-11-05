@@ -28,7 +28,7 @@ Complete guide to testing LLM Observatory using the Docker-based testing infrast
 make test-docker
 
 # Or using docker compose directly
-docker compose -f docker-compose.test.yml run --rm test-runner
+docker compose -f docker/compose/docker-compose.test.yml run --rm test-runner
 ```
 
 ### Run Tests Locally
@@ -70,7 +70,7 @@ make test-unit
 cargo nextest run --workspace --lib --all-features
 
 # Using Docker
-docker compose -f docker-compose.test.yml --profile unit-test up
+docker compose -f docker/compose/docker-compose.test.yml --profile unit-test up
 ```
 
 ### Integration Tests
@@ -92,7 +92,7 @@ make test-integration
 ./docker/test/run-specific-tests.sh --test-type integration
 
 # Using Docker
-docker compose -f docker-compose.test.yml --profile integration-test up
+docker compose -f docker/compose/docker-compose.test.yml --profile integration-test up
 ```
 
 ### End-to-End Tests
@@ -108,7 +108,7 @@ Full system tests simulating real workflows.
 **Run:**
 ```bash
 # Using Docker compose
-docker compose -f docker-compose.test.yml --profile test up
+docker compose -f docker/compose/docker-compose.test.yml --profile test up
 ```
 
 ### Benchmark Tests
@@ -124,7 +124,7 @@ Performance benchmarks for critical paths.
 **Run:**
 ```bash
 # Using Docker
-docker compose -f docker-compose.test.yml --profile benchmark up
+docker compose -f docker/compose/docker-compose.test.yml --profile benchmark up
 
 # Using cargo
 cargo bench --workspace
@@ -193,18 +193,18 @@ SEED_DATA_SIZE=large ./docker/test/seed-test-data.sh
 
 ```bash
 # Start test environment
-docker compose -f docker-compose.test.yml up -d timescaledb-test redis-test
+docker compose -f docker/compose/docker-compose.test.yml up -d timescaledb-test redis-test
 
 # Run specific test profiles
-docker compose -f docker-compose.test.yml --profile unit-test up
-docker compose -f docker-compose.test.yml --profile integration-test up
-docker compose -f docker-compose.test.yml --profile coverage up
+docker compose -f docker/compose/docker-compose.test.yml --profile unit-test up
+docker compose -f docker/compose/docker-compose.test.yml --profile integration-test up
+docker compose -f docker/compose/docker-compose.test.yml --profile coverage up
 
 # Run and remove
-docker compose -f docker-compose.test.yml run --rm test-runner
+docker compose -f docker/compose/docker-compose.test.yml run --rm test-runner
 
 # Cleanup
-docker compose -f docker-compose.test.yml down -v
+docker compose -f docker/compose/docker-compose.test.yml down -v
 ```
 
 ### Using cargo-nextest
@@ -246,7 +246,7 @@ make test-coverage
 ./docker/test/run-coverage.sh
 
 # Using Docker
-docker compose -f docker-compose.test.yml --profile coverage up
+docker compose -f docker/compose/docker-compose.test.yml --profile coverage up
 
 # Using tarpaulin directly
 cargo tarpaulin \
@@ -314,7 +314,7 @@ gh workflow run test.yml -f coverage=true
 
 ### GitLab CI
 
-See `.gitlab-ci.yml` for the complete pipeline.
+See `.ci/.gitlab-ci.yml` for the complete pipeline.
 
 **Stages:**
 1. Prepare - Build images, cache dependencies
@@ -567,7 +567,7 @@ cargo nextest run --verbose
 **Tests hanging:**
 ```bash
 # Check database connection
-docker compose -f docker-compose.test.yml exec timescaledb-test pg_isready
+docker compose -f docker/compose/docker-compose.test.yml exec timescaledb-test pg_isready
 
 # Increase timeouts
 TARPAULIN_TIMEOUT=1200 ./docker/test/run-coverage.sh
@@ -582,7 +582,7 @@ TEST_DB_PORT=15433 TEST_REDIS_PORT=16380 make start-test-db
 **Out of disk space:**
 ```bash
 # Use tmpfs for test data
-# Already configured in docker-compose.test.yml
+# Already configured in docker/compose/docker-compose.test.yml
 
 # Clean up
 make clean-test
@@ -600,7 +600,7 @@ cargo nextest run --test-threads 1 test_name
 
 ### Getting Help
 
-1. Check logs: `docker compose -f docker-compose.test.yml logs`
+1. Check logs: `docker compose -f docker/compose/docker-compose.test.yml logs`
 2. Review test output in `test-results/`
 3. Check coverage reports in `coverage/`
 4. See detailed docs in `docker/test/README.md`

@@ -30,23 +30,23 @@ This testing infrastructure provides:
 
 ```bash
 # Start test environment and run all tests
-docker compose -f docker-compose.test.yml up --build test-runner
+docker compose -f docker/compose/docker-compose.test.yml up --build test-runner
 
 # View test results
-docker compose -f docker-compose.test.yml cp test-runner:/workspace/test-results ./test-results
+docker compose -f docker/compose/docker-compose.test.yml cp test-runner:/workspace/test-results ./test-results
 ```
 
 ### Run Specific Test Types
 
 ```bash
 # Unit tests only (fast, no dependencies)
-docker compose -f docker-compose.test.yml --profile unit-test up --build
+docker compose -f docker/compose/docker-compose.test.yml --profile unit-test up --build
 
 # Integration tests (with database and Redis)
-docker compose -f docker-compose.test.yml --profile integration-test up --build
+docker compose -f docker/compose/docker-compose.test.yml --profile integration-test up --build
 
 # Coverage report
-docker compose -f docker-compose.test.yml --profile coverage up --build
+docker compose -f docker/compose/docker-compose.test.yml --profile coverage up --build
 ```
 
 ### Run Tests Locally
@@ -56,7 +56,7 @@ docker compose -f docker-compose.test.yml --profile coverage up --build
 cargo install cargo-nextest cargo-tarpaulin
 
 # Start test databases
-docker compose -f docker-compose.test.yml up -d timescaledb-test redis-test
+docker compose -f docker/compose/docker-compose.test.yml up -d timescaledb-test redis-test
 
 # Run tests
 export DATABASE_URL="postgres://test_user:test_password@localhost:5433/llm_observatory_test"
@@ -121,7 +121,7 @@ Fast tests with no external dependencies.
 
 ```bash
 # Using Docker
-docker compose -f docker-compose.test.yml --profile unit-test up
+docker compose -f docker/compose/docker-compose.test.yml --profile unit-test up
 
 # Using cargo-nextest
 cargo nextest run --workspace --lib --all-features
@@ -136,7 +136,7 @@ Tests requiring database and Redis.
 
 ```bash
 # Using Docker
-docker compose -f docker-compose.test.yml --profile integration-test up
+docker compose -f docker/compose/docker-compose.test.yml --profile integration-test up
 
 # Using cargo-nextest
 export DATABASE_URL="postgres://test_user:test_password@localhost:5433/llm_observatory_test"
@@ -155,7 +155,7 @@ Run tests in parallel shards for faster execution.
 # Run 4 parallel shards
 for i in {0..3}; do
   SHARD_INDEX=$i SHARD_TOTAL=4 \
-  docker compose -f docker-compose.test.yml --profile parallel-test up -d
+  docker compose -f docker/compose/docker-compose.test.yml --profile parallel-test up -d
 done
 
 # Or use matrix in CI/CD (see .github/workflows/test.yml)
@@ -167,7 +167,7 @@ Generate code coverage reports.
 
 ```bash
 # Using Docker
-docker compose -f docker-compose.test.yml --profile coverage up
+docker compose -f docker/compose/docker-compose.test.yml --profile coverage up
 
 # Using tarpaulin
 cargo tarpaulin \
@@ -188,7 +188,7 @@ Performance benchmarks (requires nightly Rust).
 
 ```bash
 # Using Docker
-docker compose -f docker-compose.test.yml --profile benchmark up
+docker compose -f docker/compose/docker-compose.test.yml --profile benchmark up
 
 # Using cargo bench
 cargo bench --workspace
@@ -416,33 +416,33 @@ Located in `docker/test/init/01-test-schema.sql`:
 
 ```bash
 # Check service health
-docker compose -f docker-compose.test.yml ps
+docker compose -f docker/compose/docker-compose.test.yml ps
 
 # View service logs
-docker compose -f docker-compose.test.yml logs timescaledb-test
-docker compose -f docker-compose.test.yml logs redis-test
+docker compose -f docker/compose/docker-compose.test.yml logs timescaledb-test
+docker compose -f docker/compose/docker-compose.test.yml logs redis-test
 
 # Restart services
-docker compose -f docker-compose.test.yml restart
+docker compose -f docker/compose/docker-compose.test.yml restart
 
 # Clean restart
-docker compose -f docker-compose.test.yml down -v
-docker compose -f docker-compose.test.yml up -d
+docker compose -f docker/compose/docker-compose.test.yml down -v
+docker compose -f docker/compose/docker-compose.test.yml up -d
 ```
 
 ### Database Connection Issues
 
 ```bash
 # Test database connection
-docker compose -f docker-compose.test.yml exec timescaledb-test \
+docker compose -f docker/compose/docker-compose.test.yml exec timescaledb-test \
   pg_isready -U test_user -d llm_observatory_test
 
 # Connect to database
-docker compose -f docker-compose.test.yml exec timescaledb-test \
+docker compose -f docker/compose/docker-compose.test.yml exec timescaledb-test \
   psql -U test_user -d llm_observatory_test
 
 # Check database logs
-docker compose -f docker-compose.test.yml logs timescaledb-test
+docker compose -f docker/compose/docker-compose.test.yml logs timescaledb-test
 ```
 
 ### Slow Tests
@@ -476,7 +476,7 @@ TARPAULIN_TIMEOUT=1200 ./docker/test/run-coverage.sh
 
 ```bash
 # Remove test volumes
-docker compose -f docker-compose.test.yml down -v
+docker compose -f docker/compose/docker-compose.test.yml down -v
 
 # Clean Rust build cache
 cargo clean
@@ -485,7 +485,7 @@ cargo clean
 docker builder prune -af
 
 # Full cleanup
-docker compose -f docker-compose.test.yml down -v
+docker compose -f docker/compose/docker-compose.test.yml down -v
 docker system prune -af
 rm -rf target/ .cargo/
 ```

@@ -153,7 +153,7 @@ make dev-logs
 make dev-logs-api | grep "cargo watch"
 
 # Check mounts
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml exec api ls /app/crates
+docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml exec api ls /app/crates
 ```
 
 ### Slow rebuilds
@@ -172,7 +172,7 @@ make dev-restart
 make dev-reset
 
 # Check database health
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml exec timescaledb pg_isready
+docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml exec timescaledb pg_isready
 ```
 
 ## Development Workflow
@@ -204,13 +204,13 @@ If `make` is not available:
 
 ```bash
 # Start
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml up
 
 # Stop
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml down
+docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml down
 
 # Logs
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml logs -f
+docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml logs -f
 
 # Or use the shell script
 ./scripts/dev.sh start

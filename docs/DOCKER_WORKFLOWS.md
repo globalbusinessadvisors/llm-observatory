@@ -38,7 +38,7 @@ cargo watch -x 'test'
 
 #### Option 2: Using Docker Compose with Volume Mounts
 
-Create `docker-compose.dev.yml`:
+Create `docker/compose/docker-compose.dev.yml`:
 
 ```yaml
 version: '3.8'
@@ -113,10 +113,10 @@ Start development environment:
 docker compose up -d
 
 # Start development services
-docker compose -f docker-compose.dev.yml up -d
+docker compose -f docker/compose/docker-compose.dev.yml up -d
 
 # View logs
-docker compose -f docker-compose.dev.yml logs -f api
+docker compose -f docker/compose/docker-compose.dev.yml logs -f api
 ```
 
 ### Local Development (Without Docker for App)
@@ -329,7 +329,7 @@ docker compose exec timescaledb psql -U postgres -c "CREATE DATABASE llm_observa
 docker compose exec timescaledb bash
 
 # Or start a shell in the API container (if running)
-docker compose -f docker-compose.dev.yml exec api bash
+docker compose -f docker/compose/docker-compose.dev.yml exec api bash
 
 # Inside container, use psql
 psql -U postgres -d llm_observatory
@@ -933,7 +933,7 @@ develop:
 2. **Separate dev and prod configs**:
 ```bash
 docker-compose.yml           # Base config
-docker-compose.dev.yml       # Development overrides
+docker/compose/docker-compose.dev.yml       # Development overrides
 docker-compose.prod.yml      # Production config
 ```
 

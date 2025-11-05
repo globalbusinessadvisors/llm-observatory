@@ -20,7 +20,7 @@ Complete Docker configuration for the LLM Observatory Collector Service has been
 
 ### 2. Docker Compose
 
-- **`/workspaces/llm-observatory/docker-compose.app.yml`** (NEW)
+- **`/workspaces/llm-observatory/docker/compose/docker-compose.app.yml`** (NEW)
   - Storage service configuration
   - Collector service (production)
   - Collector-dev service (development)
@@ -74,7 +74,7 @@ Complete Docker configuration for the LLM Observatory Collector Service has been
   - Already configured
   - Optimizes build context
 
-- **`/workspaces/llm-observatory/docker-compose.dev.yml`** (EXISTS)
+- **`/workspaces/llm-observatory/docker/compose/docker-compose.dev.yml`** (EXISTS)
   - Development overrides
   - Already configured
 
@@ -83,7 +83,7 @@ Complete Docker configuration for the LLM Observatory Collector Service has been
 ```
 docker/Dockerfile.collector           5.4K
 docker/Dockerfile.collector.dev       2.6K
-docker-compose.app.yml                8.2K
+docker/compose/docker-compose.app.yml                8.2K
 docker/config/collector.yaml          5.9K
 docker/COLLECTOR_README.md            ~60K
 docker/QUICKSTART.collector.md        ~8K
@@ -119,13 +119,13 @@ make -f docker/Makefile.collector build
 
 ### Run Production
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.app.yml up -d collector
+docker compose -f docker-compose.yml -f docker/compose/docker-compose.app.yml up -d collector
 make -f docker/Makefile.collector up
 ```
 
 ### Run Development
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.app.yml --profile dev up -d collector-dev
+docker compose -f docker-compose.yml -f docker/compose/docker-compose.app.yml --profile dev up -d collector-dev
 make -f docker/Makefile.collector up-dev
 ```
 

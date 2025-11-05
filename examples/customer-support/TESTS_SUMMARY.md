@@ -44,7 +44,7 @@ tests/
 scripts/
 └── run-integration-tests.sh                (Universal test runner)
 
-docker-compose.test.yml                     (Test environment)
+docker/compose/docker-compose.test.yml                     (Test environment)
 TESTS_SUMMARY.md                            (This file)
 ```
 
@@ -360,13 +360,13 @@ k6 run tests/load/analytics-api.js
 
 ```bash
 # Start test environment
-docker-compose -f docker-compose.test.yml up -d
+docker-compose -f docker/compose/docker-compose.test.yml up -d
 
 # Run tests in containers
-docker-compose -f docker-compose.test.yml exec test-runner pytest tests/integration -v
+docker-compose -f docker/compose/docker-compose.test.yml exec test-runner pytest tests/integration -v
 
 # Stop test environment
-docker-compose -f docker-compose.test.yml down -v
+docker-compose -f docker/compose/docker-compose.test.yml down -v
 ```
 
 ## Test Fixtures and Utilities

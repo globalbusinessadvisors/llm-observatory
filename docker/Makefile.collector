@@ -10,7 +10,7 @@
 .DEFAULT_GOAL := help
 
 # Variables
-COMPOSE := docker compose -f ../docker-compose.yml -f ../docker-compose.app.yml
+COMPOSE := docker compose -f ../docker-compose.yml -f ../docker/compose/docker-compose.app.yml
 IMAGE_NAME := llm-observatory/collector
 VERSION := latest
 

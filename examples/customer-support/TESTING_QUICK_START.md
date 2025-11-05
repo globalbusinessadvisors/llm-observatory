@@ -279,22 +279,22 @@ For isolated, reproducible testing:
 
 ```bash
 # Start test environment
-docker-compose -f docker-compose.test.yml up -d
+docker-compose -f docker/compose/docker-compose.test.yml up -d
 
 # Run tests in containers
-docker-compose -f docker-compose.test.yml exec test-runner \
+docker-compose -f docker/compose/docker-compose.test.yml exec test-runner \
   python -m pytest tests/integration -v
 
 # Run E2E tests
-docker-compose -f docker-compose.test.yml exec playwright-runner \
+docker-compose -f docker/compose/docker-compose.test.yml exec playwright-runner \
   npx playwright test
 
 # Run load tests
-docker-compose -f docker-compose.test.yml exec k6-runner \
+docker-compose -f docker/compose/docker-compose.test.yml exec k6-runner \
   k6 run tests/load/chat-api.js
 
 # Stop test environment
-docker-compose -f docker-compose.test.yml down -v
+docker-compose -f docker/compose/docker-compose.test.yml down -v
 ```
 
 ## Troubleshooting

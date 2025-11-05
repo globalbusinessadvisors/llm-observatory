@@ -95,7 +95,7 @@ if [ "$DOCKER" = true ]; then
   # Start test environment
   echo ""
   echo -e "${YELLOW}Starting test environment...${NC}"
-  docker-compose -f docker-compose.test.yml up -d
+  docker-compose -f docker/compose/docker-compose.test.yml up -d
 
   # Wait for services
   echo -e "${YELLOW}Waiting for services to be ready...${NC}"
@@ -171,7 +171,7 @@ case $TEST_TYPE in
     fi
 
     if [ "$DOCKER" = true ]; then
-      docker-compose -f docker-compose.test.yml exec -T test-runner \
+      docker-compose -f docker/compose/docker-compose.test.yml exec -T test-runner \
         python -m pytest $TEST_DIR/integration $PYTEST_ARGS
     else
       python -m pytest $TEST_DIR/integration $PYTEST_ARGS
@@ -181,7 +181,7 @@ case $TEST_TYPE in
   chat)
     echo -e "${YELLOW}Running chat API integration tests...${NC}"
     if [ "$DOCKER" = true ]; then
-      docker-compose -f docker-compose.test.yml exec -T test-runner \
+      docker-compose -f docker/compose/docker-compose.test.yml exec -T test-runner \
         python -m pytest $TEST_DIR/integration/test_chat_e2e.py -v
     else
       python -m pytest $TEST_DIR/integration/test_chat_e2e.py -v
@@ -191,7 +191,7 @@ case $TEST_TYPE in
   kb)
     echo -e "${YELLOW}Running KB API integration tests...${NC}"
     if [ "$DOCKER" = true ]; then
-      docker-compose -f docker-compose.test.yml exec -T test-runner \
+      docker-compose -f docker/compose/docker-compose.test.yml exec -T test-runner \
         python -m pytest $TEST_DIR/integration/test_kb_integration.py -v
     else
       python -m pytest $TEST_DIR/integration/test_kb_integration.py -v
@@ -201,7 +201,7 @@ case $TEST_TYPE in
   analytics)
     echo -e "${YELLOW}Running analytics API integration tests...${NC}"
     if [ "$DOCKER" = true ]; then
-      docker-compose -f docker-compose.test.yml exec -T test-runner \
+      docker-compose -f docker/compose/docker-compose.test.yml exec -T test-runner \
         python -m pytest $TEST_DIR/integration/test_analytics.py -v
     else
       python -m pytest $TEST_DIR/integration/test_analytics.py -v
@@ -211,7 +211,7 @@ case $TEST_TYPE in
   observatory)
     echo -e "${YELLOW}Running Observatory integration tests...${NC}"
     if [ "$DOCKER" = true ]; then
-      docker-compose -f docker-compose.test.yml exec -T test-runner \
+      docker-compose -f docker/compose/docker-compose.test.yml exec -T test-runner \
         python -m pytest $TEST_DIR/integration/test_observatory_integration.py -v
     else
       python -m pytest $TEST_DIR/integration/test_observatory_integration.py -v
@@ -227,7 +227,7 @@ case $TEST_TYPE in
     fi
 
     if [ "$DOCKER" = true ]; then
-      docker-compose -f docker-compose.test.yml exec -T playwright-runner \
+      docker-compose -f docker/compose/docker-compose.test.yml exec -T playwright-runner \
         npx playwright test
     else
       npx playwright install
@@ -276,7 +276,7 @@ fi
 if [ "$DOCKER" = true ] && [ "$STOP_CONTAINERS" = true ]; then
   echo ""
   echo -e "${YELLOW}Stopping test environment...${NC}"
-  docker-compose -f docker-compose.test.yml down -v
+  docker-compose -f docker/compose/docker-compose.test.yml down -v
   echo -e "${GREEN}Test environment stopped${NC}"
 fi
 

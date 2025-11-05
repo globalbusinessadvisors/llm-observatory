@@ -17,13 +17,13 @@ Test seeds are organized by data size and use case:
 
 ```bash
 # Seed with default (small) dataset
-docker compose -f docker-compose.test.yml run --rm test-seeder
+docker compose -f docker/compose/docker-compose.test.yml run --rm test-seeder
 
 # Seed with specific size
-SEED_DATA_SIZE=medium docker compose -f docker-compose.test.yml run --rm test-seeder
+SEED_DATA_SIZE=medium docker compose -f docker/compose/docker-compose.test.yml run --rm test-seeder
 
 # Seed with large dataset
-SEED_DATA_SIZE=large docker compose -f docker-compose.test.yml run --rm test-seeder
+SEED_DATA_SIZE=large docker compose -f docker/compose/docker-compose.test.yml run --rm test-seeder
 ```
 
 ### Manual Seeding
@@ -229,7 +229,7 @@ psql "postgres://test_user:test_password@localhost:5432/llm_observatory_test" -c
 ### Performance Issues
 
 For large datasets:
-- Use tmpfs for test database (see docker-compose.test.yml)
+- Use tmpfs for test database (see docker/compose/docker-compose.test.yml)
 - Disable fsync and synchronous commits
 - Increase shared_buffers and work_mem
 - Run ANALYZE after seeding

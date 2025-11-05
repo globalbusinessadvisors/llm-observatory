@@ -375,7 +375,7 @@ cargo sqlx migrate run
 
 ```bash
 # 1. Start services in debug mode
-docker-compose -f docker-compose.yml -f docker-compose.debug.yml up --build
+docker-compose -f docker-compose.yml -f docker/compose/docker-compose.debug.yml up --build
 
 # 2. Find the process ID
 docker exec llm-observatory-collector-debug ps aux
@@ -389,7 +389,7 @@ docker exec llm-observatory-collector-debug ps aux
 
 ```bash
 # 1. Start container with lldb-server
-docker-compose -f docker-compose.debug.yml up collector
+docker-compose -f docker/compose/docker-compose.debug.yml up collector
 
 # 2. The service will listen on port 2345
 
@@ -569,7 +569,7 @@ lldb-server platform --listen "*:2345" --server
 3. **Analyze with database logs:**
    ```bash
    # Enable PostgreSQL logging
-   docker-compose -f docker-compose.debug.yml up
+   docker-compose -f docker/compose/docker-compose.debug.yml up
    # Check logs
    docker-compose logs timescaledb | grep STATEMENT
    ```
@@ -845,7 +845,7 @@ tracing::info!(
 
 1. **Enable ptrace capability:**
    ```yaml
-   # In docker-compose.debug.yml
+   # In docker/compose/docker-compose.debug.yml
    cap_add:
      - SYS_PTRACE
    security_opt:

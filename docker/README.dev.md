@@ -6,7 +6,7 @@ This guide explains how to set up and use the hot-reload development environment
 
 1. **Start the development environment:**
    ```bash
-   docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+   docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml up
    ```
 
 2. **Access the services:**
@@ -77,97 +77,97 @@ The development environment uses Docker layer caching and volume mounts:
 
 **All services:**
 ```bash
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml up
 ```
 
 **Specific services:**
 ```bash
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml up api collector
+docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml up api collector
 ```
 
 **Background mode:**
 ```bash
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml up -d
 ```
 
 **With admin tools (PgAdmin):**
 ```bash
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml --profile admin up
+docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml --profile admin up
 ```
 
 ### Viewing Logs
 
 **All services:**
 ```bash
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml logs -f
+docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml logs -f
 ```
 
 **Specific service:**
 ```bash
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml logs -f api
+docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml logs -f api
 ```
 
 **With timestamps:**
 ```bash
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml logs -f --timestamps api
+docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml logs -f --timestamps api
 ```
 
 ### Stopping Services
 
 **Stop all:**
 ```bash
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml down
+docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml down
 ```
 
 **Stop and remove volumes:**
 ```bash
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml down -v
+docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml down -v
 ```
 
 ### Database Operations
 
 **Seed development data:**
 ```bash
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml run --rm dev-utils sh -c "psql < /seed-data/seed.sql"
+docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml run --rm dev-utils sh -c "psql < /seed-data/seed.sql"
 ```
 
 **Reset database:**
 ```bash
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml run --rm dev-utils sh -c "psql < /seed-data/reset.sql"
+docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml run --rm dev-utils sh -c "psql < /seed-data/reset.sql"
 ```
 
 **Access PostgreSQL shell:**
 ```bash
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml exec timescaledb psql -U postgres -d llm_observatory
+docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml exec timescaledb psql -U postgres -d llm_observatory
 ```
 
 **Run migrations (once migration system is implemented):**
 ```bash
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml exec api /app/target/debug/llm-observatory-api migrate
+docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml exec api /app/target/debug/llm-observatory-api migrate
 ```
 
 ### Rebuilding Services
 
 **Rebuild after dependency changes:**
 ```bash
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml build --no-cache
+docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml build --no-cache
 ```
 
 **Rebuild specific service:**
 ```bash
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml build --no-cache api
+docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml build --no-cache api
 ```
 
 **Rebuild and restart:**
 ```bash
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml up --build
 ```
 
 ### Cleaning Up
 
 **Remove stopped containers:**
 ```bash
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml rm
+docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml rm
 ```
 
 **Clean build cache volumes:**
@@ -179,7 +179,7 @@ docker volume rm llm-observatory-storage-target
 
 **Complete cleanup (WARNING: removes all data):**
 ```bash
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml down -v
+docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml down -v
 docker volume prune -f
 ```
 
@@ -233,7 +233,7 @@ RATE_LIMIT_WINDOW=60
 
 For faster rebuilds, adjust these settings:
 
-**PostgreSQL (development optimizations in docker-compose.dev.yml):**
+**PostgreSQL (development optimizations in docker/compose/docker-compose.dev.yml):**
 - `fsync=off` - Faster writes, safe for development
 - `synchronous_commit=off` - Async commits
 - `full_page_writes=off` - Reduce WAL size
@@ -260,25 +260,25 @@ For faster rebuilds, adjust these settings:
 
 2. **Verify incremental compilation:**
    ```bash
-   docker-compose -f docker-compose.yml -f docker-compose.dev.yml exec api sh -c 'echo $CARGO_INCREMENTAL'
+   docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml exec api sh -c 'echo $CARGO_INCREMENTAL'
    ```
 
 3. **Clear target directory if corrupted:**
    ```bash
    docker volume rm llm-observatory-api-target
-   docker-compose -f docker-compose.yml -f docker-compose.dev.yml up --build api
+   docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml up --build api
    ```
 
 ### Service Won't Start
 
 1. **Check logs:**
    ```bash
-   docker-compose -f docker-compose.yml -f docker-compose.dev.yml logs api
+   docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml logs api
    ```
 
 2. **Verify database connection:**
    ```bash
-   docker-compose -f docker-compose.yml -f docker-compose.dev.yml exec timescaledb pg_isready -U postgres
+   docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml exec timescaledb pg_isready -U postgres
    ```
 
 3. **Check port conflicts:**
@@ -290,7 +290,7 @@ For faster rebuilds, adjust these settings:
 
 1. **Verify cargo-watch is running:**
    ```bash
-   docker-compose -f docker-compose.yml -f docker-compose.dev.yml logs api | grep "cargo watch"
+   docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml logs api | grep "cargo watch"
    ```
 
 2. **Check file permissions:**
@@ -300,25 +300,25 @@ For faster rebuilds, adjust these settings:
 
 3. **Ensure volumes are mounted:**
    ```bash
-   docker-compose -f docker-compose.yml -f docker-compose.dev.yml exec api ls -la /app/crates
+   docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml exec api ls -la /app/crates
    ```
 
 ### Database Issues
 
 1. **Reset database:**
    ```bash
-   docker-compose -f docker-compose.yml -f docker-compose.dev.yml down -v
-   docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+   docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml down -v
+   docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml up
    ```
 
 2. **Check database health:**
    ```bash
-   docker-compose -f docker-compose.yml -f docker-compose.dev.yml exec timescaledb pg_isready
+   docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml exec timescaledb pg_isready
    ```
 
 3. **View database logs:**
    ```bash
-   docker-compose -f docker-compose.yml -f docker-compose.dev.yml logs timescaledb
+   docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml logs timescaledb
    ```
 
 ## Development Workflow
@@ -327,7 +327,7 @@ For faster rebuilds, adjust these settings:
 
 1. **Start the environment:**
    ```bash
-   docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+   docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml up
    ```
 
 2. **Make code changes** in your editor
@@ -341,7 +341,7 @@ For faster rebuilds, adjust these settings:
 
 5. **View logs** for debugging:
    ```bash
-   docker-compose -f docker-compose.yml -f docker-compose.dev.yml logs -f api
+   docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml logs -f api
    ```
 
 6. **Iterate** - repeat steps 2-5
@@ -369,12 +369,12 @@ curl -X POST http://localhost:4318/v1/traces \
 
 **Run unit tests in container:**
 ```bash
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml exec api cargo test
+docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml exec api cargo test
 ```
 
 **Run integration tests:**
 ```bash
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml exec api cargo test --test integration_tests
+docker-compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml exec api cargo test --test integration_tests
 ```
 
 ## Best Practices

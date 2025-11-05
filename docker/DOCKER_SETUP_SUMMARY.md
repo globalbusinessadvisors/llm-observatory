@@ -21,7 +21,7 @@
 
 ### Docker Compose Files
 
-3. **`docker-compose.app.yml`** (Application Services)
+3. **`docker/compose/docker-compose.app.yml`** (Application Services)
    - Storage service configuration
    - Collector service (production)
    - Collector-dev service (development with hot reload)
@@ -29,7 +29,7 @@
    - Health checks and dependencies
    - Volume configurations
 
-4. **`docker-compose.dev.yml`** (Development Overrides) - EXISTS
+4. **`docker/compose/docker-compose.dev.yml`** (Development Overrides) - EXISTS
    - Optimized for local development
    - Smaller resource limits
    - Debug logging enabled
@@ -161,10 +161,10 @@ docker compose up -d timescaledb redis
 
 ```bash
 # Production mode
-docker compose -f docker-compose.yml -f docker-compose.app.yml up -d
+docker compose -f docker-compose.yml -f docker/compose/docker-compose.app.yml up -d
 
 # Development mode
-docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.app.yml up -d
+docker compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml -f docker/compose/docker-compose.app.yml up -d
 ```
 
 ### 4. Verify Services
@@ -232,65 +232,65 @@ docker build --no-cache -f docker/Dockerfile.collector -t llm-observatory/collec
 
 ```bash
 # Start all services
-docker compose -f docker-compose.yml -f docker-compose.app.yml up -d
+docker compose -f docker-compose.yml -f docker/compose/docker-compose.app.yml up -d
 
 # Start only collector
-docker compose -f docker-compose.app.yml up -d collector
+docker compose -f docker/compose/docker-compose.app.yml up -d collector
 
 # Start with development overrides
-docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.app.yml up -d
+docker compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml -f docker/compose/docker-compose.app.yml up -d
 
 # Start dev collector with hot reload
-docker compose -f docker-compose.app.yml --profile dev up -d collector-dev
+docker compose -f docker/compose/docker-compose.app.yml --profile dev up -d collector-dev
 ```
 
 ### Monitor
 
 ```bash
 # View logs
-docker compose -f docker-compose.app.yml logs -f collector
+docker compose -f docker/compose/docker-compose.app.yml logs -f collector
 
 # View specific service
-docker compose -f docker-compose.app.yml logs -f storage
+docker compose -f docker/compose/docker-compose.app.yml logs -f storage
 
 # Check status
-docker compose -f docker-compose.app.yml ps
+docker compose -f docker/compose/docker-compose.app.yml ps
 
 # Check health
-docker compose -f docker-compose.app.yml exec collector /usr/local/bin/collector health-check
+docker compose -f docker/compose/docker-compose.app.yml exec collector /usr/local/bin/collector health-check
 ```
 
 ### Debug
 
 ```bash
 # Shell into collector
-docker compose -f docker-compose.app.yml exec collector sh
+docker compose -f docker/compose/docker-compose.app.yml exec collector sh
 
 # Check environment
-docker compose -f docker-compose.app.yml exec collector env
+docker compose -f docker/compose/docker-compose.app.yml exec collector env
 
 # Check configuration
-docker compose -f docker-compose.app.yml exec collector cat /app/config/collector.yaml
+docker compose -f docker/compose/docker-compose.app.yml exec collector cat /app/config/collector.yaml
 
 # Check connectivity
-docker compose -f docker-compose.app.yml exec collector ping storage
-docker compose -f docker-compose.app.yml exec collector ping timescaledb
+docker compose -f docker/compose/docker-compose.app.yml exec collector ping storage
+docker compose -f docker/compose/docker-compose.app.yml exec collector ping timescaledb
 ```
 
 ### Cleanup
 
 ```bash
 # Stop services
-docker compose -f docker-compose.app.yml down
+docker compose -f docker/compose/docker-compose.app.yml down
 
 # Stop and remove volumes
-docker compose -f docker-compose.app.yml down -v
+docker compose -f docker/compose/docker-compose.app.yml down -v
 
 # Remove images
 docker rmi llm-observatory/collector:latest llm-observatory/collector:dev
 
 # Full cleanup
-docker compose -f docker-compose.yml -f docker-compose.app.yml down -v --rmi all
+docker compose -f docker-compose.yml -f docker/compose/docker-compose.app.yml down -v --rmi all
 ```
 
 ## Using Make (Recommended)
@@ -325,7 +325,7 @@ make -f docker/Makefile.collector clean
 
 ```bash
 # 1. Start dev services
-docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.app.yml --profile dev up -d
+docker compose -f docker-compose.yml -f docker/compose/docker-compose.dev.yml -f docker/compose/docker-compose.app.yml --profile dev up -d
 
 # 2. Edit source code in crates/collector/
 
@@ -340,13 +340,13 @@ curl -X POST http://localhost:4338/v1/traces -d @test_trace.json
 
 ```bash
 # Run unit tests
-docker compose -f docker-compose.app.yml exec collector-dev cargo test
+docker compose -f docker/compose/docker-compose.app.yml exec collector-dev cargo test
 
 # Run integration tests
-docker compose -f docker-compose.app.yml exec collector-dev cargo test --features integration
+docker compose -f docker/compose/docker-compose.app.yml exec collector-dev cargo test --features integration
 
 # Run benchmarks
-docker compose -f docker-compose.app.yml exec collector-dev cargo bench
+docker compose -f docker/compose/docker-compose.app.yml exec collector-dev cargo bench
 ```
 
 ## Production Deployment
@@ -392,10 +392,10 @@ COLLECTOR_NUM_WORKERS=2
 docker compose ps timescaledb redis storage
 
 # Check logs
-docker compose -f docker-compose.app.yml logs collector
+docker compose -f docker/compose/docker-compose.app.yml logs collector
 
 # Verify database connection
-docker compose -f docker-compose.app.yml exec collector psql $DATABASE_URL -c "SELECT 1"
+docker compose -f docker/compose/docker-compose.app.yml exec collector psql $DATABASE_URL -c "SELECT 1"
 ```
 
 ### Port conflicts
@@ -406,7 +406,7 @@ sudo lsof -i :4327
 
 # Use different ports
 export COLLECTOR_OTLP_GRPC_PORT=4427
-docker compose -f docker-compose.app.yml up -d collector
+docker compose -f docker/compose/docker-compose.app.yml up -d collector
 ```
 
 ### High memory usage
@@ -432,7 +432,7 @@ COLLECTOR_MAX_QUEUE_SIZE=1000
 curl http://localhost:8082/health
 
 # 2. Check logs for errors
-docker compose -f docker-compose.app.yml logs collector | grep -i error
+docker compose -f docker/compose/docker-compose.app.yml logs collector | grep -i error
 
 # 3. Send test trace
 curl -X POST http://localhost:4328/v1/traces -d @test_trace.json
