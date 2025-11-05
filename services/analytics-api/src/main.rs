@@ -1,6 +1,8 @@
-use analytics_api::{models::*, routes};
+use analytics_api::{middleware::auth::JwtValidator, models::*, routes};
 use axum::{
+    extract::State,
     http::{header, HeaderValue, Method, StatusCode},
+    middleware,
     routing::get,
     Json, Router,
 };
@@ -67,6 +69,12 @@ async fn main() -> anyhow::Result<()> {
         .and_then(|p| p.parse().ok())
         .unwrap_or(9091);
 
+    // JWT secret for authentication
+    let jwt_secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| {
+        info!("JWT_SECRET not set, using default (not secure for production!)");
+        "default_jwt_secret_change_in_production_minimum_32_characters".to_string()
+    });
+
     // Initialize Prometheus metrics
     let prometheus_handle = setup_metrics_recorder()?;
     info!("Metrics exporter listening on port {}", metrics_port);
@@ -93,7 +101,7 @@ async fn main() -> anyhow::Result<()> {
     let redis_client = redis::Client::open(redis_url)?;
 
     // Test Redis connection
-    let mut redis_conn = redis_client.get_async_connection().await?;
+    let mut redis_conn = redis_client.get_multiplexed_async_connection().await?;
     redis::cmd("PING")
         .query_async::<_, String>(&mut redis_conn)
         .await?;
@@ -106,8 +114,11 @@ async fn main() -> anyhow::Result<()> {
         cache_ttl,
     });
 
+    // Create JWT validator
+    let jwt_validator = Arc::new(JwtValidator::new(&jwt_secret));
+
     // Build application router
-    let app = build_router(app_state.clone(), prometheus_handle);
+    let app = build_router(app_state.clone(), jwt_validator, prometheus_handle);
 
     // Start server
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
@@ -120,7 +131,11 @@ async fn main() -> anyhow::Result<()> {
 }
 
 /// Build the application router with all routes and middleware
-fn build_router(state: Arc<AppState>, prometheus_handle: PrometheusHandle) -> Router {
+fn build_router(
+    state: Arc<AppState>,
+    jwt_validator: Arc<JwtValidator>,
+    prometheus_handle: PrometheusHandle,
+) -> Router {
     // Create CORS layer
     let cors = CorsLayer::new()
         .allow_origin(
@@ -134,18 +149,37 @@ fn build_router(state: Arc<AppState>, prometheus_handle: PrometheusHandle) -> Ro
         .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION])
         .max_age(Duration::from_secs(3600));
 
-    // Build API routes
-    let api_routes = Router::new()
+    // Protected API routes (require authentication and rate limiting)
+    let protected_routes = Router::new()
+        .merge(routes::traces::routes())
+        .merge(routes::metrics::routes())
         .merge(routes::costs::routes())
+        .merge(routes::export::routes())
+        .layer(middleware::from_fn_with_state(
+            jwt_validator.clone(),
+            analytics_api::middleware::auth::require_auth,
+        ))
+        .layer(middleware::from_fn_with_state(
+            state.redis_client.clone(),
+            analytics_api::middleware::rate_limit::rate_limit_middleware,
+        ));
+
+    // Public API routes (no authentication required, with caching)
+    let cache_config = analytics_api::middleware::CacheConfig::new(60); // 60 second cache
+    let public_routes = Router::new()
         .merge(routes::performance::routes())
         .merge(routes::quality::routes())
-        .merge(routes::models::routes());
+        .merge(routes::models::routes())
+        .layer(middleware::from_fn(move |req, next| {
+            analytics_api::middleware::caching::cache_middleware(cache_config, req, next)
+        }));
 
     // Build main router
     Router::new()
         .route("/health", get(health_check))
         .route("/metrics", get(move || async move { prometheus_handle.render() }))
-        .merge(api_routes)
+        .merge(protected_routes)
+        .merge(public_routes)
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(DefaultMakeSpan::new().level(Level::INFO))
@@ -165,7 +199,7 @@ async fn health_check(State(state): State<Arc<AppState>>) -> Result<Json<HealthR
     };
 
     // Check Redis
-    let redis_status = match state.redis_client.get_async_connection().await {
+    let redis_status = match state.redis_client.get_multiplexed_async_connection().await {
         Ok(mut conn) => {
             match redis::cmd("PING")
                 .query_async::<_, String>(&mut conn)

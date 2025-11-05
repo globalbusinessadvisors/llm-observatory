@@ -1,0 +1,128 @@
+name: Daily Security Scan
+
+on:
+  schedule:
+    - cron: '0 2 * * *'  # 2 AM UTC daily
+  workflow_dispatch:
+
+jobs:
+  security-audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install security tools
+        run: |
+          cargo install cargo-audit --locked
+          cargo install cargo-deny --locked
+
+      - name: Run cargo audit
+        id: cargo-audit
+        run: |
+          cd services/analytics-api
+          cargo audit --json > audit-report.json || true
+
+          # Check for vulnerabilities
+          VULNS=$(jq '.vulnerabilities.count' audit-report.json)
+          echo "vulnerabilities=$VULNS" >> $GITHUB_OUTPUT
+
+          if [ "$VULNS" -gt 0 ]; then
+            echo "⚠️ Found $VULNS vulnerabilities"
+            cargo audit
+          else
+            echo "✅ No vulnerabilities found"
+          fi
+        continue-on-error: true
+
+      - name: Run cargo deny
+        id: cargo-deny
+        run: |
+          cd services/analytics-api
+          cargo deny check advisories 2>&1 | tee deny-report.txt || true
+
+          if grep -q "error" deny-report.txt; then
+            echo "status=failed" >> $GITHUB_OUTPUT
+            echo "⚠️ Security advisories found"
+          else
+            echo "status=passed" >> $GITHUB_OUTPUT
+            echo "✅ No security advisories"
+          fi
+        continue-on-error: true
+
+      - name: Scan for secrets
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
+      - name: Create security report
+        run: |
+          echo "### 🔒 Daily Security Scan Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Date:** $(date)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Results:**" >> $GITHUB_STEP_SUMMARY
+          echo "- Cargo Audit: ${{ steps.cargo-audit.outputs.vulnerabilities }} vulnerabilities" >> $GITHUB_STEP_SUMMARY
+          echo "- Cargo Deny: ${{ steps.cargo-deny.outputs.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Secret Scan: Completed" >> $GITHUB_STEP_SUMMARY
+
+      - name: Create GitHub issue on failure
+        if: steps.cargo-audit.outputs.vulnerabilities != '0' || steps.cargo-deny.outputs.status == 'failed'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const vulns = '${{ steps.cargo-audit.outputs.vulnerabilities }}';
+            const denyStatus = '${{ steps.cargo-deny.outputs.status }}';
+
+            const body = `## 🚨 Security Vulnerabilities Detected
+
+            Daily security scan found issues that require attention:
+
+            - **Cargo Audit:** ${vulns} vulnerabilities
+            - **Cargo Deny:** ${denyStatus}
+
+            ### Action Required
+            1. Review the workflow logs for details
+            2. Update vulnerable dependencies
+            3. Address any security advisories
+
+            **Workflow Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            `;
+
+            // Check if issue already exists
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'security'
+            });
+
+            const existingIssue = issues.data.find(issue =>
+              issue.title.includes('Security Vulnerabilities Detected')
+            );
+
+            if (existingIssue) {
+              // Update existing issue
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existingIssue.number,
+                body: `**Update:** ${new Date().toISOString()}\n\n${body}`
+              });
+            } else {
+              // Create new issue
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: '🚨 Security Vulnerabilities Detected',
+                body: body,
+                labels: ['security', 'high-priority']
+              });
+            }

@@ -7,7 +7,7 @@
 # ============================================================================
 # Stage 1: Chef - Prepare dependencies for caching
 # ============================================================================
-FROM rust:1.75-slim-bookworm AS chef
+FROM rust:1.82-slim-bookworm AS chef
 
 # Install cargo-chef for dependency caching
 RUN cargo install cargo-chef --locked

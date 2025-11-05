@@ -1,6 +1,20 @@
+pub mod costs;
+pub mod export;
+pub mod filters;
+pub mod metrics;
+pub mod traces;
+pub mod websocket;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+pub use costs::*;
+pub use export::*;
+pub use filters::*;
+pub use metrics::*;
+pub use traces::*;
+pub use websocket::*;
 
 /// Common query parameters for analytics endpoints
 #[derive(Debug, Deserialize, Clone)]
@@ -183,20 +197,20 @@ pub enum ComparisonMetric {
 }
 
 /// Model comparison response
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ModelComparison {
     pub models: Vec<ModelComparisonResult>,
     pub summary: ModelComparisonSummary,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ModelComparisonResult {
     pub model: String,
     pub provider: String,
     pub metrics: ModelMetrics,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ModelMetrics {
     pub avg_latency_ms: f64,
     pub p95_latency_ms: Option<f64>,
@@ -208,7 +222,7 @@ pub struct ModelMetrics {
     pub throughput_rps: f64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ModelComparisonSummary {
     pub fastest_model: String,
     pub cheapest_model: String,
@@ -217,7 +231,7 @@ pub struct ModelComparisonSummary {
 }
 
 /// Optimization recommendations response
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct OptimizationRecommendations {
     pub cost_optimizations: Vec<Recommendation>,
     pub performance_optimizations: Vec<Recommendation>,
@@ -225,7 +239,7 @@ pub struct OptimizationRecommendations {
     pub overall_score: f64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Recommendation {
     pub title: String,
     pub description: String,

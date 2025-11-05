@@ -1,0 +1,769 @@
+openapi: 3.0.3
+info:
+  title: LLM Observatory Analytics API
+  description: |
+    Enterprise-grade REST API for querying and analyzing LLM traces, metrics, and performance data.
+
+    ## Features
+    - Advanced filtering with 13 operators (eq, ne, gt, gte, lt, lte, in, not_in, contains, not_contains, starts_with, ends_with, regex, search)
+    - Full-text search with PostgreSQL GIN indexes
+    - Cursor-based pagination for stable, efficient paging
+    - Redis caching for repeated queries
+    - JWT authentication and RBAC
+    - Rate limiting based on user role
+
+    ## Authentication
+    All endpoints require authentication via JWT token in the Authorization header:
+    ```
+    Authorization: Bearer <jwt_token>
+    ```
+
+    ## Rate Limits
+    - Admin: 100,000 requests/minute
+    - Developer: 10,000 requests/minute
+    - Viewer: 1,000 requests/minute
+    - Billing: 1,000 requests/minute
+
+    Rate limit information is included in response headers:
+    - `X-RateLimit-Limit`: Total requests allowed
+    - `X-RateLimit-Remaining`: Remaining requests
+    - `X-RateLimit-Reset`: Unix timestamp when limit resets
+
+  version: 1.0.0
+  contact:
+    name: LLM Observatory Team
+    email: support@llm-observatory.example.com
+  license:
+    name: Apache 2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0.html
+
+servers:
+  - url: http://localhost:8080
+    description: Local development server
+  - url: https://api.llm-observatory.example.com
+    description: Production server
+
+tags:
+  - name: Traces
+    description: Query and retrieve LLM traces
+  - name: Health
+    description: Health check and monitoring
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      description: Check the health status of the API, database, and Redis
+      operationId: healthCheck
+      tags:
+        - Health
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '503':
+          description: Service is degraded or unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /api/v1/traces:
+    get:
+      summary: List traces
+      description: |
+        Retrieve a paginated list of traces with optional filtering.
+
+        This endpoint supports basic filtering using query parameters.
+        For advanced filtering with complex logical operators, use POST /api/v1/traces/search.
+      operationId: listTraces
+      tags:
+        - Traces
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: from
+          in: query
+          description: Start time (ISO 8601 or relative like "now-1h")
+          schema:
+            type: string
+            format: date-time
+          example: "2025-11-01T00:00:00Z"
+        - name: to
+          in: query
+          description: End time (ISO 8601 or relative)
+          schema:
+            type: string
+            format: date-time
+          example: "2025-11-05T23:59:59Z"
+        - name: project_id
+          in: query
+          description: Filter by project ID (required for non-admin users)
+          schema:
+            type: string
+          example: "project-123"
+        - name: provider
+          in: query
+          description: Filter by provider (e.g., "openai", "anthropic")
+          schema:
+            type: string
+          example: "openai"
+        - name: model
+          in: query
+          description: Filter by model (e.g., "gpt-4", "claude-3-opus")
+          schema:
+            type: string
+          example: "gpt-4"
+        - name: status
+          in: query
+          description: Filter by status code
+          schema:
+            type: string
+          example: "SUCCESS"
+        - name: min_duration
+          in: query
+          description: Minimum duration in milliseconds
+          schema:
+            type: integer
+          example: 1000
+        - name: max_duration
+          in: query
+          description: Maximum duration in milliseconds
+          schema:
+            type: integer
+          example: 5000
+        - name: min_cost
+          in: query
+          description: Minimum cost in USD
+          schema:
+            type: number
+            format: float
+          example: 0.01
+        - name: max_cost
+          in: query
+          description: Maximum cost in USD
+          schema:
+            type: number
+            format: float
+          example: 1.0
+        - name: environment
+          in: query
+          description: Filter by environment
+          schema:
+            type: string
+          example: "production"
+        - name: user_id
+          in: query
+          description: Filter by user ID
+          schema:
+            type: string
+        - name: session_id
+          in: query
+          description: Filter by session ID
+          schema:
+            type: string
+        - name: search
+          in: query
+          description: Full-text search in input/output (basic ILIKE search)
+          schema:
+            type: string
+        - name: cursor
+          in: query
+          description: Pagination cursor from previous response
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: Number of results per page (1-1000)
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 50
+        - name: sort_by
+          in: query
+          description: Field to sort by
+          schema:
+            type: string
+            default: "ts"
+        - name: sort_order
+          in: query
+          description: Sort order
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedTraceResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/RateLimitExceeded'
+
+  /api/v1/traces/search:
+    post:
+      summary: Advanced trace search
+      description: |
+        Search traces using advanced filters with complex logical operators.
+
+        ## Features
+        - 13 filter operators: eq, ne, gt, gte, lt, lte, in, not_in, contains, not_contains, starts_with, ends_with, regex, search
+        - Logical operators: AND, OR, NOT with unlimited nesting
+        - Full-text search using PostgreSQL GIN indexes (40-500x faster than ILIKE)
+        - Field selection to return only needed fields
+        - Custom sorting with direction control
+        - Cursor-based pagination
+        - Redis caching
+
+        ## Performance
+        - Simple filters: 10-30ms
+        - Complex nested filters: 30-100ms
+        - Full-text search: 20-80ms
+      operationId: searchTraces
+      tags:
+        - Traces
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdvancedSearchRequest'
+            examples:
+              simpleFilter:
+                summary: Simple equality filter
+                value:
+                  filter:
+                    field: "provider"
+                    operator: "eq"
+                    value: "openai"
+                  limit: 50
+              complexFilter:
+                summary: Complex nested filter with full-text search
+                value:
+                  filter:
+                    operator: "and"
+                    filters:
+                      - field: "provider"
+                        operator: "eq"
+                        value: "openai"
+                      - field: "input_text"
+                        operator: "search"
+                        value: "authentication error"
+                      - operator: "or"
+                        filters:
+                          - field: "duration_ms"
+                            operator: "gte"
+                            value: 1000
+                          - field: "total_cost_usd"
+                            operator: "gt"
+                            value: 0.1
+                  sort_by: "ts"
+                  sort_desc: true
+                  limit: 100
+                  fields: ["trace_id", "provider", "model", "duration_ms", "total_cost_usd"]
+              fullTextSearch:
+                summary: Full-text search with ranking
+                value:
+                  filter:
+                    field: "input_text"
+                    operator: "search"
+                    value: "generate code for authentication"
+                  sort_by: "ts"
+                  sort_desc: true
+                  limit: 50
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedTraceResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/RateLimitExceeded'
+
+  /api/v1/traces/{trace_id}:
+    get:
+      summary: Get trace by ID
+      description: Retrieve a single trace by its trace ID
+      operationId: getTraceById
+      tags:
+        - Traces
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: trace_id
+          in: path
+          required: true
+          description: Trace ID to retrieve
+          schema:
+            type: string
+          example: "trace-abc123"
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SingleTraceResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT token obtained from authentication endpoint
+
+  schemas:
+    HealthResponse:
+      type: object
+      required:
+        - status
+        - database
+        - redis
+        - timestamp
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded]
+          description: Overall service status
+        database:
+          type: string
+          enum: [healthy, unhealthy]
+          description: Database connection status
+        redis:
+          type: string
+          enum: [healthy, unhealthy]
+          description: Redis connection status
+        timestamp:
+          type: string
+          format: date-time
+          description: Timestamp of health check
+
+    Trace:
+      type: object
+      required:
+        - ts
+        - trace_id
+        - span_id
+      properties:
+        ts:
+          type: string
+          format: date-time
+          description: Timestamp of the trace
+        trace_id:
+          type: string
+          description: Unique trace identifier
+        span_id:
+          type: string
+          description: Unique span identifier
+        parent_span_id:
+          type: string
+          nullable: true
+          description: Parent span identifier for nested spans
+        service_name:
+          type: string
+          nullable: true
+          description: Name of the service that generated the trace
+        span_name:
+          type: string
+          nullable: true
+          description: Name of the span
+        provider:
+          type: string
+          description: LLM provider (e.g., "openai", "anthropic")
+        model:
+          type: string
+          description: Model name (e.g., "gpt-4", "claude-3-opus")
+        input_text:
+          type: string
+          nullable: true
+          description: Input prompt or text
+        output_text:
+          type: string
+          nullable: true
+          description: Generated output text
+        prompt_tokens:
+          type: integer
+          nullable: true
+          description: Number of prompt tokens
+        completion_tokens:
+          type: integer
+          nullable: true
+          description: Number of completion tokens
+        total_tokens:
+          type: integer
+          nullable: true
+          description: Total tokens (prompt + completion)
+        prompt_cost_usd:
+          type: number
+          format: float
+          nullable: true
+          description: Cost of prompt tokens in USD
+        completion_cost_usd:
+          type: number
+          format: float
+          nullable: true
+          description: Cost of completion tokens in USD
+        total_cost_usd:
+          type: number
+          format: float
+          nullable: true
+          description: Total cost in USD
+        duration_ms:
+          type: integer
+          nullable: true
+          description: Request duration in milliseconds
+        ttft_ms:
+          type: integer
+          nullable: true
+          description: Time to first token in milliseconds
+        status_code:
+          type: string
+          description: Status code (e.g., "SUCCESS", "ERROR")
+        error_message:
+          type: string
+          nullable: true
+          description: Error message if request failed
+        user_id:
+          type: string
+          nullable: true
+          description: User identifier
+        session_id:
+          type: string
+          nullable: true
+          description: Session identifier
+        environment:
+          type: string
+          nullable: true
+          description: Environment (e.g., "production", "staging")
+        tags:
+          type: array
+          items:
+            type: string
+          nullable: true
+          description: Tags associated with the trace
+        attributes:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: Additional attributes as JSON
+
+    PaginatedTraceResponse:
+      type: object
+      required:
+        - status
+        - data
+        - pagination
+        - meta
+      properties:
+        status:
+          type: string
+          enum: [success]
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Trace'
+        pagination:
+          $ref: '#/components/schemas/PaginationMetadata'
+        meta:
+          $ref: '#/components/schemas/ResponseMetadata'
+
+    SingleTraceResponse:
+      type: object
+      required:
+        - status
+        - data
+        - meta
+      properties:
+        status:
+          type: string
+          enum: [success]
+        data:
+          $ref: '#/components/schemas/Trace'
+        meta:
+          $ref: '#/components/schemas/ResponseMetadata'
+
+    PaginationMetadata:
+      type: object
+      required:
+        - has_more
+        - limit
+      properties:
+        cursor:
+          type: string
+          nullable: true
+          description: Cursor for next page (base64 encoded)
+        has_more:
+          type: boolean
+          description: Whether more results are available
+        limit:
+          type: integer
+          description: Number of results per page
+        total:
+          type: integer
+          nullable: true
+          description: Total count (null to avoid expensive COUNT queries)
+
+    ResponseMetadata:
+      type: object
+      required:
+        - timestamp
+        - execution_time_ms
+        - cached
+        - version
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+          description: Response timestamp
+        execution_time_ms:
+          type: integer
+          description: Execution time in milliseconds
+        cached:
+          type: boolean
+          description: Whether response was served from cache
+        version:
+          type: string
+          description: API version
+        request_id:
+          type: string
+          nullable: true
+          description: Unique request identifier for tracing
+
+    AdvancedSearchRequest:
+      type: object
+      properties:
+        filter:
+          oneOf:
+            - $ref: '#/components/schemas/FieldFilter'
+            - $ref: '#/components/schemas/LogicalFilter'
+          nullable: true
+          description: Filter criteria (optional)
+        sort_by:
+          type: string
+          nullable: true
+          description: Field to sort by
+          example: "ts"
+        sort_desc:
+          type: boolean
+          default: false
+          description: Sort in descending order
+        cursor:
+          type: string
+          nullable: true
+          description: Pagination cursor
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 1000
+          default: 50
+          description: Number of results per page
+        fields:
+          type: array
+          items:
+            type: string
+          nullable: true
+          description: Fields to include in response (omit for all fields)
+          example: ["trace_id", "provider", "model", "duration_ms"]
+
+    FieldFilter:
+      type: object
+      required:
+        - field
+        - operator
+        - value
+      properties:
+        field:
+          type: string
+          description: Field name to filter on
+          example: "provider"
+        operator:
+          type: string
+          enum:
+            - eq
+            - ne
+            - gt
+            - gte
+            - lt
+            - lte
+            - in
+            - not_in
+            - contains
+            - not_contains
+            - starts_with
+            - ends_with
+            - regex
+            - search
+          description: Filter operator
+        value:
+          oneOf:
+            - type: string
+            - type: number
+            - type: integer
+            - type: boolean
+            - type: array
+              items:
+                oneOf:
+                  - type: string
+                  - type: number
+                  - type: integer
+          description: Filter value (type depends on operator)
+
+    LogicalFilter:
+      type: object
+      required:
+        - operator
+        - filters
+      properties:
+        operator:
+          type: string
+          enum: [AND, OR, NOT]
+          description: Logical operator
+        filters:
+          type: array
+          items:
+            oneOf:
+              - $ref: '#/components/schemas/FieldFilter'
+              - $ref: '#/components/schemas/LogicalFilter'
+          description: Filters to combine (recursive)
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - meta
+      properties:
+        error:
+          type: object
+          required:
+            - code
+            - message
+          properties:
+            code:
+              type: string
+              description: Error code
+            message:
+              type: string
+              description: Human-readable error message
+            details:
+              type: string
+              nullable: true
+              description: Additional error details
+        meta:
+          type: object
+          required:
+            - timestamp
+          properties:
+            timestamp:
+              type: string
+              format: date-time
+
+  responses:
+    BadRequest:
+      description: Bad request - Invalid parameters or filter
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: "BAD_REQUEST"
+              message: "Invalid filter: field 'invalid_field' is not allowed"
+            meta:
+              timestamp: "2025-11-05T10:00:00Z"
+
+    Unauthorized:
+      description: Unauthorized - Missing or invalid JWT token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: "UNAUTHORIZED"
+              message: "Invalid or missing JWT token"
+            meta:
+              timestamp: "2025-11-05T10:00:00Z"
+
+    Forbidden:
+      description: Forbidden - Insufficient permissions
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: "FORBIDDEN"
+              message: "Insufficient permissions to read traces"
+            meta:
+              timestamp: "2025-11-05T10:00:00Z"
+
+    NotFound:
+      description: Not found - Resource does not exist
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: "NOT_FOUND"
+              message: "Trace with ID 'trace-123' not found"
+            meta:
+              timestamp: "2025-11-05T10:00:00Z"
+
+    RateLimitExceeded:
+      description: Rate limit exceeded
+      headers:
+        X-RateLimit-Limit:
+          schema:
+            type: integer
+          description: Total requests allowed
+        X-RateLimit-Remaining:
+          schema:
+            type: integer
+          description: Remaining requests (will be 0)
+        X-RateLimit-Reset:
+          schema:
+            type: integer
+          description: Unix timestamp when limit resets
+        Retry-After:
+          schema:
+            type: integer
+          description: Seconds until rate limit resets
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: "RATE_LIMIT_EXCEEDED"
+              message: "Too many requests. Please slow down."
+            meta:
+              timestamp: "2025-11-05T10:00:00Z"

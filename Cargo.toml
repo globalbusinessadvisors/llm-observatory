@@ -43,12 +43,12 @@ serde_json = "1.0"
 serde_yaml = "0.9"
 toml = "0.8"
 
-# OpenTelemetry
-opentelemetry = { version = "0.24", features = ["metrics", "trace", "logs"] }
-opentelemetry-otlp = { version = "0.17", features = ["grpc-tonic", "http-proto"] }
-opentelemetry-semantic-conventions = "0.24"
-opentelemetry_sdk = { version = "0.24", features = ["rt-tokio"] }
-opentelemetry-proto = "0.7"
+# OpenTelemetry - using latest compatible versions
+opentelemetry = { version = "0.27", features = ["metrics", "trace", "logs"] }
+opentelemetry-otlp = { version = "0.27", features = ["grpc-tonic", "http-proto"] }
+opentelemetry-semantic-conventions = "0.27"
+opentelemetry_sdk = { version = "0.27", features = ["rt-tokio"] }
+opentelemetry-proto = "0.27"
 tonic = "0.12"
 prost = "0.13"
 
