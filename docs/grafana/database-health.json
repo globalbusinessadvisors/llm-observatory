@@ -1,0 +1,333 @@
+{
+  "dashboard": {
+    "title": "LLM Observatory - Database Health",
+    "tags": ["llm-observatory", "storage", "database", "health"],
+    "timezone": "browser",
+    "schemaVersion": 38,
+    "version": 1,
+    "refresh": "10s",
+    "panels": [
+      {
+        "title": "Connection Pool Health",
+        "type": "gauge",
+        "gridPos": { "h": 8, "w": 8, "x": 0, "y": 0 },
+        "targets": [
+          {
+            "expr": "(storage_pool_connections{state=\"active\"} / storage_pool_connections{state=\"max\"}) * 100",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "showThresholdLabels": false,
+          "showThresholdMarkers": true
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": 0,
+            "max": 100,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "value": null, "color": "green" },
+                { "value": 70, "color": "yellow" },
+                { "value": 85, "color": "red" }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "title": "Write Success Rate",
+        "type": "gauge",
+        "gridPos": { "h": 8, "w": 8, "x": 8, "y": 0 },
+        "targets": [
+          {
+            "expr": "(rate(storage_writes_total{status=\"success\"}[5m]) / rate(storage_writes_total[5m])) * 100",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "showThresholdLabels": false,
+          "showThresholdMarkers": true
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": 0,
+            "max": 100,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "value": null, "color": "red" },
+                { "value": 95, "color": "yellow" },
+                { "value": 99, "color": "green" }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "title": "Query Success Rate",
+        "type": "gauge",
+        "gridPos": { "h": 8, "w": 8, "x": 16, "y": 0 },
+        "targets": [
+          {
+            "expr": "100 - (rate(storage_errors_total{operation=~\".*query.*\"}[5m]) / (rate(storage_query_duration_seconds_count[5m]) + rate(storage_errors_total{operation=~\".*query.*\"}[5m])) * 100)",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "showThresholdLabels": false,
+          "showThresholdMarkers": true
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": 0,
+            "max": 100,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "value": null, "color": "red" },
+                { "value": 95, "color": "yellow" },
+                { "value": 99, "color": "green" }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "title": "Active Connections Over Time",
+        "type": "timeseries",
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+        "targets": [
+          {
+            "expr": "storage_pool_connections{state=\"active\"}",
+            "legendFormat": "Active",
+            "refId": "A"
+          },
+          {
+            "expr": "storage_pool_connections{state=\"idle\"}",
+            "legendFormat": "Idle",
+            "refId": "B"
+          }
+        ],
+        "options": {
+          "legend": { "displayMode": "list", "placement": "bottom" }
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "color": { "mode": "palette-classic" }
+          }
+        }
+      },
+      {
+        "title": "Error Types Distribution",
+        "type": "piechart",
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+        "targets": [
+          {
+            "expr": "sum by (error_type) (increase(storage_errors_total[5m]))",
+            "legendFormat": "{{error_type}}",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "legend": { "displayMode": "table", "placement": "right" }
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short"
+          }
+        }
+      },
+      {
+        "title": "Write Operations by Type",
+        "type": "timeseries",
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+        "targets": [
+          {
+            "expr": "rate(storage_writes_total{status=\"success\"}[1m])",
+            "legendFormat": "{{writer_type}} - {{operation}}",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(storage_writes_total{status=\"error\"}[1m])",
+            "legendFormat": "ERROR - {{writer_type}} - {{operation}}",
+            "refId": "B"
+          }
+        ],
+        "options": {
+          "legend": { "displayMode": "table", "placement": "right" }
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "ops",
+            "color": { "mode": "palette-classic" }
+          }
+        }
+      },
+      {
+        "title": "Query Operations by Repository",
+        "type": "timeseries",
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+        "targets": [
+          {
+            "expr": "rate(storage_query_duration_seconds_count[1m])",
+            "legendFormat": "{{repository}} - {{method}}",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "legend": { "displayMode": "table", "placement": "right" }
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "ops",
+            "color": { "mode": "palette-classic" }
+          }
+        }
+      },
+      {
+        "title": "Write Latency Distribution",
+        "type": "heatmap",
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+        "targets": [
+          {
+            "expr": "sum(rate(storage_write_duration_seconds_bucket[5m])) by (le)",
+            "format": "heatmap",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "calculate": false,
+          "calculation": {},
+          "cellGap": 2,
+          "cellValues": {},
+          "color": {
+            "exponent": 0.5,
+            "fill": "dark-orange",
+            "mode": "scheme",
+            "reverse": false,
+            "scale": "exponential",
+            "scheme": "Spectral",
+            "steps": 128
+          },
+          "exemplars": { "color": "rgba(255,0,255,0.7)" },
+          "filterValues": { "le": 1e-9 },
+          "legend": { "show": true },
+          "rowsFrame": { "layout": "auto" },
+          "tooltip": { "show": true, "yHistogram": false },
+          "yAxis": {
+            "axisPlacement": "left",
+            "reverse": false,
+            "unit": "s"
+          }
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "hideFrom": {
+                "tooltip": false,
+                "viz": false,
+                "legend": false
+              },
+              "scaleDistribution": {
+                "type": "linear"
+              }
+            }
+          }
+        }
+      },
+      {
+        "title": "Query Latency Distribution",
+        "type": "heatmap",
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+        "targets": [
+          {
+            "expr": "sum(rate(storage_query_duration_seconds_bucket[5m])) by (le)",
+            "format": "heatmap",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "calculate": false,
+          "calculation": {},
+          "cellGap": 2,
+          "cellValues": {},
+          "color": {
+            "exponent": 0.5,
+            "fill": "dark-orange",
+            "mode": "scheme",
+            "reverse": false,
+            "scale": "exponential",
+            "scheme": "Spectral",
+            "steps": 128
+          },
+          "exemplars": { "color": "rgba(255,0,255,0.7)" },
+          "filterValues": { "le": 1e-9 },
+          "legend": { "show": true },
+          "rowsFrame": { "layout": "auto" },
+          "tooltip": { "show": true, "yHistogram": false },
+          "yAxis": {
+            "axisPlacement": "left",
+            "reverse": false,
+            "unit": "s"
+          }
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "hideFrom": {
+                "tooltip": false,
+                "viz": false,
+                "legend": false
+              },
+              "scaleDistribution": {
+                "type": "linear"
+              }
+            }
+          }
+        }
+      },
+      {
+        "title": "COPY vs INSERT Performance",
+        "type": "timeseries",
+        "gridPos": { "h": 8, "w": 24, "x": 0, "y": 32 },
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(storage_write_duration_seconds_bucket{operation=\"copy\"}[5m]))",
+            "legendFormat": "COPY p95 - {{writer_type}}",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(storage_write_duration_seconds_bucket{operation=~\"insert|write_.*\"}[5m]))",
+            "legendFormat": "INSERT p95 - {{writer_type}}",
+            "refId": "B"
+          },
+          {
+            "expr": "histogram_quantile(0.50, rate(storage_write_duration_seconds_bucket{operation=\"copy\"}[5m]))",
+            "legendFormat": "COPY p50 - {{writer_type}}",
+            "refId": "C"
+          },
+          {
+            "expr": "histogram_quantile(0.50, rate(storage_write_duration_seconds_bucket{operation=~\"insert|write_.*\"}[5m]))",
+            "legendFormat": "INSERT p50 - {{writer_type}}",
+            "refId": "D"
+          }
+        ],
+        "options": {
+          "legend": { "displayMode": "table", "placement": "right" }
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "color": { "mode": "palette-classic" }
+          }
+        }
+      }
+    ]
+  }
+}

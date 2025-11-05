@@ -1,0 +1,208 @@
+version: '3.8'
+
+services:
+  # TimescaleDB - PostgreSQL with time-series extensions
+  timescaledb:
+    image: timescale/timescaledb:2.14.2-pg16
+    container_name: llm-observatory-db
+    restart: unless-stopped
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_DB: ${DB_NAME:-llm_observatory}
+      # TimescaleDB specific settings
+      TIMESCALEDB_TELEMETRY: "off"
+      # Performance tuning for development
+      POSTGRES_SHARED_BUFFERS: ${DB_SHARED_BUFFERS:-256MB}
+      POSTGRES_WORK_MEM: ${DB_WORK_MEM:-32MB}
+      POSTGRES_MAINTENANCE_WORK_MEM: ${DB_MAINTENANCE_WORK_MEM:-128MB}
+      POSTGRES_EFFECTIVE_CACHE_SIZE: ${DB_EFFECTIVE_CACHE_SIZE:-1GB}
+    volumes:
+      # Persistent data storage
+      - timescaledb_data:/var/lib/postgresql/data
+      # Initialization scripts
+      - ./docker/init:/docker-entrypoint-initdb.d:ro
+      # Optional: Custom PostgreSQL configuration
+      # - ./docker/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-llm_observatory}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - llm-observatory-network
+    command: >
+      postgres
+      -c shared_preload_libraries=timescaledb
+      -c max_connections=200
+      -c log_statement=mod
+      -c log_duration=on
+      -c log_min_duration_statement=1000
+
+  # Redis - Caching and session storage
+  redis:
+    image: redis:7.2-alpine
+    container_name: llm-observatory-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-redis_password}
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    networks:
+      - llm-observatory-network
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD:-redis_password}
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+      --appendfsync everysec
+
+  # Grafana - Visualization and dashboards
+  grafana:
+    image: grafana/grafana:10.4.1
+    container_name: llm-observatory-grafana
+    restart: unless-stopped
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    environment:
+      # Admin credentials
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      # Server settings
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost:3000}
+      GF_SERVER_DOMAIN: ${GRAFANA_DOMAIN:-localhost}
+      # Database configuration (using TimescaleDB for Grafana's metadata)
+      GF_DATABASE_TYPE: postgres
+      GF_DATABASE_HOST: timescaledb:5432
+      GF_DATABASE_NAME: ${GRAFANA_DB_NAME:-grafana}
+      GF_DATABASE_USER: ${DB_USER:-postgres}
+      GF_DATABASE_PASSWORD: ${DB_PASSWORD:-postgres}
+      GF_DATABASE_SSL_MODE: disable
+      # Authentication
+      GF_AUTH_ANONYMOUS_ENABLED: ${GRAFANA_ANONYMOUS_ENABLED:-false}
+      # Plugins
+      GF_INSTALL_PLUGINS: ${GRAFANA_PLUGINS:-}
+      # Disable telemetry
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      # Optional: Pre-configured dashboards
+      # - ./docker/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      # - ./docker/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - llm-observatory-network
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+
+  # PgAdmin - Optional database administration UI
+  pgadmin:
+    image: dpage/pgadmin4:8.4
+    container_name: llm-observatory-pgadmin
+    restart: unless-stopped
+    ports:
+      - "${PGADMIN_PORT:-5050}:80"
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@llm-observatory.local}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    healthcheck:
+      test: ["CMD", "wget", "-O", "-", "http://localhost:80/misc/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - llm-observatory-network
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    profiles:
+      - admin  # Only start with --profile admin
+
+  # Backup Service - Automated database backups
+  backup:
+    image: postgres:16-alpine
+    container_name: llm-observatory-backup
+    restart: "no"  # Only run on demand or via cron
+    environment:
+      PGHOST: timescaledb
+      PGPORT: 5432
+      PGDATABASE: ${DB_NAME:-llm_observatory}
+      PGUSER: ${DB_USER:-postgres}
+      PGPASSWORD: ${DB_PASSWORD:-postgres}
+      # Backup configuration
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION:-30}
+      # AWS S3 configuration (optional)
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      S3_BACKUP_BUCKET: ${S3_BACKUP_BUCKET:-}
+      S3_BACKUP_PREFIX: ${S3_BACKUP_PREFIX:-backups/}
+    volumes:
+      # Backup storage
+      - backup_data:/backups
+      # Backup scripts
+      - ./scripts:/scripts:ro
+      # Configuration
+      - ./.env:/app/.env:ro
+    networks:
+      - llm-observatory-network
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    profiles:
+      - backup  # Only start with --profile backup
+    entrypoint: ["/bin/sh"]
+    command:
+      - -c
+      - |
+        # Install required tools
+        apk add --no-cache bash gzip aws-cli
+
+        # Run backup script
+        if [ -f /scripts/backup.sh ]; then
+          bash /scripts/backup.sh -c /app/.env -d /backups -v
+        else
+          echo "Backup script not found"
+          exit 1
+        fi
+
+networks:
+  llm-observatory-network:
+    driver: bridge
+    name: llm-observatory-network
+
+volumes:
+  timescaledb_data:
+    name: llm-observatory-db-data
+  redis_data:
+    name: llm-observatory-redis-data
+  grafana_data:
+    name: llm-observatory-grafana-data
+  pgadmin_data:
+    name: llm-observatory-pgadmin-data
+  backup_data:
+    name: llm-observatory-backup-data

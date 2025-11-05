@@ -1,0 +1,107 @@
+[workspace]
+members = [
+    "crates/core",
+    "crates/collector",
+    "crates/storage",
+    "crates/api",
+    "crates/sdk",
+    "crates/providers",
+    "crates/cli",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75.0"
+authors = ["LLM Observatory Contributors"]
+license = "Apache-2.0"
+repository = "https://github.com/llm-observatory/llm-observatory"
+homepage = "https://llm-observatory.io"
+documentation = "https://docs.llm-observatory.io"
+keywords = ["llm", "observability", "opentelemetry", "monitoring", "tracing"]
+categories = ["development-tools::profiling", "web-programming"]
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1.40", features = ["full"] }
+tokio-util = "0.7"
+async-trait = "0.1"
+futures = "0.3"
+
+# HTTP/Web
+axum = { version = "0.7", features = ["macros", "ws"] }
+tower = { version = "0.4", features = ["full"] }
+tower-http = { version = "0.5", features = ["full"] }
+hyper = "1.0"
+reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+toml = "0.8"
+
+# OpenTelemetry
+opentelemetry = { version = "0.24", features = ["metrics", "trace", "logs"] }
+opentelemetry-otlp = { version = "0.17", features = ["grpc-tonic", "http-proto"] }
+opentelemetry-semantic-conventions = "0.24"
+opentelemetry_sdk = { version = "0.24", features = ["rt-tokio"] }
+opentelemetry-proto = "0.7"
+tonic = "0.12"
+prost = "0.13"
+
+# Database
+sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid", "json"] }
+redis = { version = "0.26", features = ["tokio-comp", "connection-manager"] }
+
+# Observability
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+metrics = "0.23"
+metrics-exporter-prometheus = "0.15"
+
+# CLI
+clap = { version = "4.5", features = ["derive", "env"] }
+colored = "2.1"
+indicatif = "0.17"
+
+# Error handling
+thiserror = "1.0"
+anyhow = "1.0"
+
+# Utilities
+uuid = { version = "1.10", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+regex = "1.10"
+lazy_static = "1.5"
+once_cell = "1.19"
+dashmap = "6.1"
+
+# Configuration
+config = "0.14"
+dotenvy = "0.15"
+
+# Security
+argon2 = "0.5"
+jsonwebtoken = "9.3"
+ring = "0.17"
+
+# Testing
+mockall = "0.13"
+
+[profile.dev]
+opt-level = 0
+debug = true
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
+panic = "abort"
+
+[profile.release-with-debug]
+inherits = "release"
+strip = false
+debug = true

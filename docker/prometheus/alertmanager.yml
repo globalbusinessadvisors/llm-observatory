@@ -1,0 +1,345 @@
+# Alertmanager Configuration for LLM Observatory Storage Layer
+#
+# This configuration defines how alerts are routed and which notification
+# channels to use for different alert severities and components.
+#
+# To use this configuration:
+# 1. Update the notification endpoints (Slack, PagerDuty, email) with your values
+# 2. Copy this file to your Alertmanager configuration directory
+# 3. Reload Alertmanager configuration
+
+global:
+  # Global configuration
+  resolve_timeout: 5m
+
+  # Slack global settings
+  slack_api_url: 'YOUR_SLACK_WEBHOOK_URL'
+
+  # PagerDuty global settings
+  pagerduty_url: 'https://events.pagerduty.com/v2/enqueue'
+
+# Templates for notifications
+templates:
+  - '/etc/alertmanager/templates/*.tmpl'
+
+# Route tree for alerts
+route:
+  # Default receiver for all alerts
+  receiver: 'default'
+
+  # Group alerts by these labels
+  group_by: ['alertname', 'cluster', 'service', 'severity']
+
+  # How long to wait before sending initial notification
+  group_wait: 10s
+
+  # How long to wait before sending notification about new alerts in group
+  group_interval: 10s
+
+  # How long to wait before re-sending notification
+  repeat_interval: 12h
+
+  # Child routes
+  routes:
+    ##########################################################################
+    # Critical Alerts - Page immediately
+    ##########################################################################
+    - match:
+        severity: critical
+      receiver: 'pagerduty-critical'
+      group_wait: 10s
+      group_interval: 5m
+      repeat_interval: 3h
+      continue: true
+
+    - match:
+        severity: critical
+      receiver: 'slack-critical'
+      group_wait: 10s
+      group_interval: 5m
+      repeat_interval: 3h
+
+    ##########################################################################
+    # Warning Alerts - Notify team channel
+    ##########################################################################
+    - match:
+        severity: warning
+      receiver: 'slack-warnings'
+      group_wait: 30s
+      group_interval: 10m
+      repeat_interval: 12h
+
+    ##########################################################################
+    # Info Alerts - Log only
+    ##########################################################################
+    - match:
+        severity: info
+      receiver: 'slack-info'
+      group_wait: 5m
+      group_interval: 1h
+      repeat_interval: 24h
+
+    ##########################################################################
+    # Database Specific Alerts
+    ##########################################################################
+    - match:
+        component: database
+      receiver: 'slack-database'
+      routes:
+        - match:
+            severity: critical
+          receiver: 'pagerduty-database'
+          continue: true
+
+    ##########################################################################
+    # Backup Alerts - Always page for backup failures
+    ##########################################################################
+    - match:
+        component: backup
+      receiver: 'pagerduty-backup'
+      group_wait: 5m
+      repeat_interval: 6h
+      continue: true
+
+    - match:
+        component: backup
+      receiver: 'slack-backup'
+      group_wait: 5m
+      repeat_interval: 6h
+
+# Inhibition rules - Suppress certain alerts when others are firing
+inhibit_rules:
+  # Inhibit warning alerts if critical alert is firing
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname', 'instance']
+
+  # Inhibit all alerts if service is down
+  - source_match:
+      alertname: 'StorageServiceDown'
+    target_match_re:
+      alertname: '.*'
+    equal: ['instance']
+
+  # Inhibit connection pool alerts if database is down
+  - source_match:
+      alertname: 'DatabaseDown'
+    target_match:
+      component: 'connection-pool'
+    equal: ['instance']
+
+# Receiver configurations
+receivers:
+  ##########################################################################
+  # Default receiver
+  ##########################################################################
+  - name: 'default'
+    slack_configs:
+      - channel: '#llm-observatory-alerts'
+        title: 'Alert: {{ .GroupLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}
+          *Alert:* {{ .Labels.alertname }}
+          *Severity:* {{ .Labels.severity }}
+          *Instance:* {{ .Labels.instance }}
+          *Summary:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          {{ if .Annotations.runbook_url }}*Runbook:* {{ .Annotations.runbook_url }}{{ end }}
+          {{ end }}
+        color: '{{ if eq .Status "firing" }}danger{{ else }}good{{ end }}'
+        send_resolved: true
+
+  ##########################################################################
+  # PagerDuty receivers
+  ##########################################################################
+  - name: 'pagerduty-critical'
+    pagerduty_configs:
+      - service_key: 'YOUR_PAGERDUTY_SERVICE_KEY_CRITICAL'
+        description: '{{ .GroupLabels.alertname }}: {{ .CommonAnnotations.summary }}'
+        details:
+          severity: '{{ .CommonLabels.severity }}'
+          component: '{{ .CommonLabels.component }}'
+          instance: '{{ .CommonLabels.instance }}'
+          description: '{{ .CommonAnnotations.description }}'
+          runbook_url: '{{ .CommonAnnotations.runbook_url }}'
+        client: 'LLM Observatory Alertmanager'
+        client_url: 'https://prometheus.llm-observatory.io'
+
+  - name: 'pagerduty-database'
+    pagerduty_configs:
+      - service_key: 'YOUR_PAGERDUTY_SERVICE_KEY_DATABASE'
+        description: 'Database: {{ .GroupLabels.alertname }}'
+        severity: '{{ .CommonLabels.severity }}'
+
+  - name: 'pagerduty-backup'
+    pagerduty_configs:
+      - service_key: 'YOUR_PAGERDUTY_SERVICE_KEY_BACKUP'
+        description: 'Backup: {{ .GroupLabels.alertname }}'
+        severity: 'critical'
+
+  ##########################################################################
+  # Slack receivers
+  ##########################################################################
+  - name: 'slack-critical'
+    slack_configs:
+      - channel: '#llm-observatory-critical'
+        username: 'AlertManager'
+        icon_emoji: ':rotating_light:'
+        title: 'CRITICAL: {{ .GroupLabels.alertname }}'
+        text: |
+          <!channel> Critical alert fired!
+
+          {{ range .Alerts }}
+          *Severity:* {{ .Labels.severity | toUpper }}
+          *Component:* {{ .Labels.component }}
+          *Instance:* {{ .Labels.instance }}
+          *Summary:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          {{ if .Annotations.action }}*Action Required:* {{ .Annotations.action }}{{ end }}
+          {{ if .Annotations.runbook_url }}*Runbook:* {{ .Annotations.runbook_url }}{{ end }}
+          {{ if .Annotations.dashboard }}*Dashboard:* {{ .Annotations.dashboard }}{{ end }}
+          *Status:* {{ .Status | toUpper }}
+          {{ end }}
+        color: 'danger'
+        send_resolved: true
+
+  - name: 'slack-warnings'
+    slack_configs:
+      - channel: '#llm-observatory-alerts'
+        username: 'AlertManager'
+        icon_emoji: ':warning:'
+        title: 'Warning: {{ .GroupLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}
+          *Severity:* {{ .Labels.severity }}
+          *Component:* {{ .Labels.component }}
+          *Instance:* {{ .Labels.instance }}
+          *Summary:* {{ .Annotations.summary }}
+          {{ if .Annotations.runbook_url }}*Runbook:* {{ .Annotations.runbook_url }}{{ end }}
+          {{ end }}
+        color: 'warning'
+        send_resolved: true
+
+  - name: 'slack-info'
+    slack_configs:
+      - channel: '#llm-observatory-monitoring'
+        username: 'AlertManager'
+        icon_emoji: ':information_source:'
+        title: 'Info: {{ .GroupLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}
+          *{{ .Labels.alertname }}*
+          {{ .Annotations.summary }}
+          {{ end }}
+        color: '#439FE0'
+        send_resolved: false
+
+  - name: 'slack-database'
+    slack_configs:
+      - channel: '#llm-observatory-database'
+        username: 'AlertManager'
+        icon_emoji: ':database:'
+        title: 'Database Alert: {{ .GroupLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}
+          *Severity:* {{ .Labels.severity }}
+          *Database:* {{ .Labels.instance }}
+          *Summary:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          {{ if .Annotations.action }}*Action:* {{ .Annotations.action }}{{ end }}
+          {{ if .Annotations.runbook_url }}*Runbook:* {{ .Annotations.runbook_url }}{{ end }}
+          {{ end }}
+        color: '{{ if eq .Status "firing" }}{{ if eq .CommonLabels.severity "critical" }}danger{{ else }}warning{{ end }}{{ else }}good{{ end }}'
+        send_resolved: true
+
+  - name: 'slack-backup'
+    slack_configs:
+      - channel: '#llm-observatory-critical'
+        username: 'AlertManager'
+        icon_emoji: ':floppy_disk:'
+        title: 'Backup Alert: {{ .GroupLabels.alertname }}'
+        text: |
+          <!channel> Backup issue detected!
+
+          {{ range .Alerts }}
+          *Summary:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          *Action:* {{ .Annotations.action }}
+          {{ if .Annotations.runbook_url }}*Runbook:* {{ .Annotations.runbook_url }}{{ end }}
+          {{ end }}
+        color: 'danger'
+        send_resolved: true
+
+  ##########################################################################
+  # Email receivers
+  ##########################################################################
+  - name: 'email-ops'
+    email_configs:
+      - to: 'ops-team@llm-observatory.io'
+        from: 'alertmanager@llm-observatory.io'
+        smarthost: 'smtp.gmail.com:587'
+        auth_username: 'alertmanager@llm-observatory.io'
+        auth_password: 'YOUR_EMAIL_PASSWORD'
+        headers:
+          Subject: '[{{ .Status | toUpper }}{{ if eq .Status "firing" }}:{{ .Alerts.Firing | len }}{{ end }}] {{ .GroupLabels.alertname }}'
+        html: |
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <style>
+              body { font-family: Arial, sans-serif; }
+              .alert { border-left: 4px solid #dc3545; padding: 10px; margin: 10px 0; }
+              .critical { border-color: #dc3545; }
+              .warning { border-color: #ffc107; }
+              .info { border-color: #17a2b8; }
+            </style>
+          </head>
+          <body>
+            <h2>{{ .GroupLabels.alertname }}</h2>
+            {{ range .Alerts }}
+            <div class="alert {{ .Labels.severity }}">
+              <strong>Severity:</strong> {{ .Labels.severity }}<br>
+              <strong>Component:</strong> {{ .Labels.component }}<br>
+              <strong>Instance:</strong> {{ .Labels.instance }}<br>
+              <strong>Summary:</strong> {{ .Annotations.summary }}<br>
+              <strong>Description:</strong> {{ .Annotations.description }}<br>
+              {{ if .Annotations.runbook_url }}
+              <strong>Runbook:</strong> <a href="{{ .Annotations.runbook_url }}">{{ .Annotations.runbook_url }}</a><br>
+              {{ end }}
+              <strong>Status:</strong> {{ .Status }}<br>
+              <strong>Fired At:</strong> {{ .StartsAt }}<br>
+            </div>
+            {{ end }}
+          </body>
+          </html>
+        send_resolved: true
+
+# Time intervals for muting alerts during maintenance windows
+time_intervals:
+  - name: weekday-business-hours
+    time_intervals:
+      - times:
+          - start_time: '09:00'
+            end_time: '17:00'
+        weekdays: ['monday:friday']
+
+  - name: weekend
+    time_intervals:
+      - weekdays: ['saturday', 'sunday']
+
+  - name: maintenance-window
+    time_intervals:
+      - times:
+          - start_time: '02:00'
+            end_time: '04:00'
+        weekdays: ['sunday']
+
+# Mute time intervals can be used in routes like this:
+# routes:
+#   - match:
+#       severity: info
+#     receiver: 'slack-info'
+#     mute_time_intervals:
+#       - weekend

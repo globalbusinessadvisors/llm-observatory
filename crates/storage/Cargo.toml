@@ -1,0 +1,94 @@
+[package]
+name = "llm-observatory-storage"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Storage layer for LLM Observatory - handles persistence of traces, metrics, and logs"
+
+[dependencies]
+# Core dependencies
+llm-observatory-core = { path = "../core" }
+
+# Async runtime
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
+async-trait = { workspace = true }
+futures = { workspace = true }
+
+# Database
+sqlx = { workspace = true, features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid", "json", "migrate"] }
+tokio-postgres = { version = "0.7", features = ["with-uuid-1", "with-chrono-0_4", "with-serde_json-1"] }
+redis = { workspace = true, features = ["tokio-comp", "connection-manager", "streams"] }
+
+# Serialization
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+
+# Utilities
+uuid = { workspace = true, features = ["v4", "serde"] }
+chrono = { workspace = true, features = ["serde"] }
+dashmap = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+
+# Observability
+tracing = { workspace = true }
+metrics = { workspace = true }
+metrics-exporter-prometheus = { workspace = true }
+
+# HTTP server for health/metrics endpoints
+axum = { workspace = true, features = ["macros"] }
+
+# Configuration
+config = { workspace = true }
+dotenvy = { workspace = true }
+
+[dev-dependencies]
+tokio-test = "0.4"
+mockall = { workspace = true }
+tempfile = "3.12"
+rand = "0.8"
+tracing-subscriber = { workspace = true }
+testcontainers = "0.23"
+testcontainers-modules = { version = "0.11", features = ["postgres"] }
+once_cell = "1.19"
+criterion = { version = "0.5", features = ["async_tokio", "html_reports"] }
+
+[[bench]]
+name = "copy_vs_insert"
+harness = false
+
+[[bench]]
+name = "writer_throughput"
+harness = false
+
+[[bench]]
+name = "query_performance"
+harness = false
+
+[[bench]]
+name = "pool_performance"
+harness = false
+
+[[bench]]
+name = "concurrent_writes"
+harness = false
+
+[[bench]]
+name = "mixed_workload"
+harness = false
+
+[features]
+default = ["postgres", "redis"]
+postgres = []
+redis = []
+migrations = []
+llm-span-conversion = []

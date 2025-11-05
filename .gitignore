@@ -1,0 +1,78 @@
+# Rust
+/target/
+**/*.rs.bk
+*.pdb
+Cargo.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment
+.env
+.env.local
+.env.*.local
+*.log
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+data/
+postgres-data/
+
+# Docker
+docker-compose.override.yml
+
+# Build artifacts
+/dist/
+/build/
+*.tar.gz
+*.zip
+
+# Test artifacts
+/coverage/
+*.profraw
+*.profdata
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Linux
+*~
+.directory
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Node (for any JS tooling)
+node_modules/
+package-lock.json
+yarn.lock
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+
+# Documentation build
+/docs/_build/
+/docs/.doctrees/
+
+# Helm
+helm/*.tgz
+
+# Secrets
+*.key
+*.pem
+*.crt
+secrets/
+credentials/

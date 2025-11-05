@@ -1,0 +1,321 @@
+{
+  "dashboard": {
+    "title": "LLM Observatory - Storage Overview",
+    "tags": ["llm-observatory", "storage", "monitoring"],
+    "timezone": "browser",
+    "schemaVersion": 38,
+    "version": 1,
+    "refresh": "10s",
+    "panels": [
+      {
+        "title": "Write Throughput (ops/sec)",
+        "type": "timeseries",
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+        "targets": [
+          {
+            "expr": "rate(storage_writes_total{status=\"success\"}[1m])",
+            "legendFormat": "{{writer_type}} - {{operation}}",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "legend": { "displayMode": "table", "placement": "right" }
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "ops",
+            "color": { "mode": "palette-classic" }
+          }
+        }
+      },
+      {
+        "title": "Write Latency (p95)",
+        "type": "timeseries",
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(storage_write_duration_seconds_bucket[5m]))",
+            "legendFormat": "{{writer_type}} - {{operation}}",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "legend": { "displayMode": "table", "placement": "right" }
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "color": { "mode": "palette-classic" }
+          }
+        }
+      },
+      {
+        "title": "Items Written per Second",
+        "type": "timeseries",
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+        "targets": [
+          {
+            "expr": "rate(storage_items_written_total[1m])",
+            "legendFormat": "{{writer_type}} - {{item_type}}",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "legend": { "displayMode": "table", "placement": "right" }
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "ops",
+            "color": { "mode": "palette-classic" }
+          }
+        }
+      },
+      {
+        "title": "Batch Sizes",
+        "type": "timeseries",
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, rate(storage_batch_size_bucket[5m]))",
+            "legendFormat": "p50 - {{writer_type}} - {{operation}}",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(storage_batch_size_bucket[5m]))",
+            "legendFormat": "p95 - {{writer_type}} - {{operation}}",
+            "refId": "B"
+          }
+        ],
+        "options": {
+          "legend": { "displayMode": "table", "placement": "right" }
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "color": { "mode": "palette-classic" }
+          }
+        }
+      },
+      {
+        "title": "Connection Pool Utilization",
+        "type": "timeseries",
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+        "targets": [
+          {
+            "expr": "storage_pool_connections{state=\"active\"}",
+            "legendFormat": "Active",
+            "refId": "A"
+          },
+          {
+            "expr": "storage_pool_connections{state=\"idle\"}",
+            "legendFormat": "Idle",
+            "refId": "B"
+          },
+          {
+            "expr": "storage_pool_connections{state=\"max\"}",
+            "legendFormat": "Max",
+            "refId": "C"
+          }
+        ],
+        "options": {
+          "legend": { "displayMode": "list", "placement": "bottom" }
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "color": { "mode": "palette-classic" }
+          },
+          "overrides": [
+            {
+              "matcher": { "id": "byName", "options": "Max" },
+              "properties": [
+                { "id": "custom.lineStyle", "value": { "dash": [10, 10], "fill": "dash" } }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "title": "Query Latency (p95)",
+        "type": "timeseries",
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(storage_query_duration_seconds_bucket[5m]))",
+            "legendFormat": "{{repository}} - {{method}}",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "legend": { "displayMode": "table", "placement": "right" }
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "color": { "mode": "palette-classic" }
+          }
+        }
+      },
+      {
+        "title": "Error Rate",
+        "type": "timeseries",
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+        "targets": [
+          {
+            "expr": "rate(storage_errors_total[1m])",
+            "legendFormat": "{{error_type}} - {{operation}}",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "legend": { "displayMode": "table", "placement": "right" }
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "ops",
+            "color": { "mode": "palette-classic" },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "value": null, "color": "green" },
+                { "value": 0.1, "color": "yellow" },
+                { "value": 1, "color": "red" }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "title": "Buffer Sizes",
+        "type": "timeseries",
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+        "targets": [
+          {
+            "expr": "storage_buffer_size",
+            "legendFormat": "{{writer_type}} - {{buffer_type}}",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "legend": { "displayMode": "table", "placement": "right" }
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "color": { "mode": "palette-classic" }
+          }
+        }
+      },
+      {
+        "title": "Flush Operations",
+        "type": "stat",
+        "gridPos": { "h": 4, "w": 6, "x": 0, "y": 32 },
+        "targets": [
+          {
+            "expr": "rate(storage_flushes_total{status=\"success\"}[5m])",
+            "legendFormat": "{{writer_type}}",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "graphMode": "area",
+          "colorMode": "value"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "ops",
+            "color": { "mode": "thresholds" },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "value": null, "color": "green" }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "title": "Retry Rate",
+        "type": "stat",
+        "gridPos": { "h": 4, "w": 6, "x": 6, "y": 32 },
+        "targets": [
+          {
+            "expr": "rate(storage_retries_total[5m])",
+            "legendFormat": "{{operation}}",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "graphMode": "area",
+          "colorMode": "value"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "ops",
+            "color": { "mode": "thresholds" },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "value": null, "color": "green" },
+                { "value": 0.5, "color": "yellow" },
+                { "value": 2, "color": "red" }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "title": "Query Result Counts (avg)",
+        "type": "stat",
+        "gridPos": { "h": 4, "w": 6, "x": 12, "y": 32 },
+        "targets": [
+          {
+            "expr": "avg(rate(storage_query_result_count_sum[5m]) / rate(storage_query_result_count_count[5m])) by (repository, method)",
+            "legendFormat": "{{repository}} - {{method}}",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "graphMode": "area",
+          "colorMode": "value"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "color": { "mode": "thresholds" },
+            "decimals": 1
+          }
+        }
+      },
+      {
+        "title": "Connection Acquisition Time (p95)",
+        "type": "stat",
+        "gridPos": { "h": 4, "w": 6, "x": 18, "y": 32 },
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(storage_connection_acquire_duration_seconds_bucket[5m]))",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "graphMode": "area",
+          "colorMode": "value"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "color": { "mode": "thresholds" },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "value": null, "color": "green" },
+                { "value": 0.1, "color": "yellow" },
+                { "value": 0.5, "color": "red" }
+              ]
+            }
+          }
+        }
+      }
+    ]
+  }
+}

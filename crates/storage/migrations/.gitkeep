@@ -1,0 +1,9 @@
+# This directory will contain SQLx database migrations
+#
+# Migrations will be added in the format:
+# YYYYMMDDHHMMSS_description.sql
+#
+# Example:
+# 20250101000000_create_traces_table.sql
+# 20250101000001_create_metrics_table.sql
+# 20250101000002_create_logs_table.sql
