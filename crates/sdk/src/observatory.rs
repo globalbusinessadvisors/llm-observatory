@@ -225,8 +225,8 @@ impl ObservatoryBuilder {
         // Set global tracer provider
         let _ = global::set_tracer_provider(provider.clone());
 
-        // Get tracer
-        let tracer = provider.tracer("llm-observatory");
+        // Get tracer from global provider to get BoxedTracer
+        let tracer = global::tracer("llm-observatory");
 
         // Setup tracing subscriber for console logging if enabled
         if self.enable_console_export {
