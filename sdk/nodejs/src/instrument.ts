@@ -10,6 +10,7 @@ import {
   InstrumentOpenAIOptions,
   Provider,
   TokenUsage,
+  ErrorType,
 } from './types';
 import { LLMTracer, createTracer } from './tracing';
 import { PricingEngine } from './cost';

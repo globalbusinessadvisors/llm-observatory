@@ -1,0 +1,180 @@
+name: Publish Rust Crates to crates.io
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (e.g., 0.1.0)'
+        required: true
+        type: string
+      crates:
+        description: 'Crates to publish (comma-separated: core,providers,storage,collector,sdk or "all")'
+        required: true
+        type: string
+        default: 'all'
+      dry_run:
+        description: 'Perform a dry run (no actual publish)'
+        required: false
+        type: boolean
+        default: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: crates-io-publishing
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: 1.75.0
+          components: rustfmt, clippy
+
+      - name: Install cargo-edit
+        run: cargo install cargo-edit
+
+      - name: Update workspace version
+        run: |
+          # Update version in workspace Cargo.toml
+          sed -i 's/^version = .*/version = "${{ inputs.version }}"/' Cargo.toml
+
+      - name: Run formatting check
+        run: cargo fmt --all -- --check
+
+      - name: Run clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Run tests
+        run: cargo test --workspace
+
+      - name: Determine crates to publish
+        id: crates
+        run: |
+          if [ "${{ inputs.crates }}" = "all" ]; then
+            CRATES="core providers storage collector sdk"
+          else
+            CRATES="${{ inputs.crates }}"
+          fi
+          echo "crates=$CRATES" >> $GITHUB_OUTPUT
+          echo "Publishing crates: $CRATES"
+
+      - name: Publish crates (dry run)
+        if: inputs.dry_run == true
+        run: |
+          # Publish in dependency order
+          for crate in ${{ steps.crates.outputs.crates }}; do
+            echo "🔍 Dry run publishing llm-observatory-$crate..."
+            cd crates/$crate
+            cargo publish --dry-run --allow-dirty
+            cd ../..
+          done
+
+      - name: Login to crates.io
+        if: inputs.dry_run == false
+        run: cargo login ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Publish crates
+        if: inputs.dry_run == false
+        run: |
+          # Publish in dependency order to respect inter-crate dependencies
+          # Core must be published first, then providers, storage, collector, sdk
+          PUBLISH_ORDER="core providers storage collector sdk"
+
+          for crate in $PUBLISH_ORDER; do
+            # Check if this crate should be published
+            if [[ "${{ steps.crates.outputs.crates }}" == *"$crate"* ]]; then
+              echo "📦 Publishing llm-observatory-$crate..."
+              cd crates/$crate
+
+              # Verify package before publishing
+              cargo package --list
+
+              # Publish with retries (crates.io can be slow to propagate dependencies)
+              MAX_RETRIES=5
+              RETRY=0
+
+              while [ $RETRY -lt $MAX_RETRIES ]; do
+                if cargo publish --allow-dirty; then
+                  echo "✅ Successfully published llm-observatory-$crate"
+                  break
+                else
+                  RETRY=$((RETRY+1))
+                  if [ $RETRY -lt $MAX_RETRIES ]; then
+                    echo "⏳ Retry $RETRY/$MAX_RETRIES after 30 seconds..."
+                    sleep 30
+                  else
+                    echo "❌ Failed to publish llm-observatory-$crate after $MAX_RETRIES attempts"
+                    exit 1
+                  fi
+                fi
+              done
+
+              cd ../..
+
+              # Wait for crates.io to propagate before publishing dependent crates
+              echo "⏳ Waiting 60 seconds for crates.io to propagate..."
+              sleep 60
+            fi
+          done
+
+      - name: Create Git tag
+        if: inputs.dry_run == false
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Cargo.toml crates/*/Cargo.toml
+          git commit -m "chore: bump version to ${{ inputs.version }}"
+          git tag -a "v${{ inputs.version }}" -m "Release v${{ inputs.version }}"
+          git push origin main
+          git push origin "v${{ inputs.version }}"
+
+      - name: Create GitHub Release
+        if: inputs.dry_run == false
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v${{ inputs.version }}
+          release_name: Rust Crates v${{ inputs.version }}
+          body: |
+            ## LLM Observatory Rust Crates v${{ inputs.version }}
+
+            Published to crates.io:
+
+            ### Installation
+            ```toml
+            [dependencies]
+            llm-observatory-core = "${{ inputs.version }}"
+            llm-observatory-providers = "${{ inputs.version }}"
+            llm-observatory-storage = "${{ inputs.version }}"
+            llm-observatory-collector = "${{ inputs.version }}"
+            llm-observatory-sdk = "${{ inputs.version }}"
+            ```
+
+            ### Documentation
+            - [Documentation](https://docs.rs/llm-observatory-core)
+            - [GitHub Repository](https://github.com/${{ github.repository }})
+          draft: false
+          prerelease: false
+
+      - name: Summary
+        run: |
+          echo "### Publication Summary :package:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version**: ${{ inputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Crates**: ${{ steps.crates.outputs.crates }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Dry Run**: ${{ inputs.dry_run }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ inputs.dry_run }}" = "false" ]; then
+            echo "✅ Successfully published to crates.io!" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "View on crates.io:" >> $GITHUB_STEP_SUMMARY
+            for crate in ${{ steps.crates.outputs.crates }}; do
+              echo "- [llm-observatory-$crate](https://crates.io/crates/llm-observatory-$crate)" >> $GITHUB_STEP_SUMMARY
+            done
+          else
+            echo "ℹ️ Dry run completed. No actual publish performed." >> $GITHUB_STEP_SUMMARY
+          fi

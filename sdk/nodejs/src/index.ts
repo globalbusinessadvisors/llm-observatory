@@ -79,6 +79,15 @@ export {
   ObservatoryError,
 } from './types';
 
+// Import everything for default export
+import {
+  initObservatory as init,
+  getObservatory as get,
+  shutdownObservatory as shutdown,
+} from './observatory';
+import { instrumentOpenAI as instrument } from './instrument';
+import { PricingEngine as Pricing } from './cost';
+
 /**
  * Package version
  */
@@ -87,13 +96,11 @@ export const VERSION = '0.1.0';
 /**
  * Default export for convenience
  */
-const observatory = {
-  initObservatory,
-  getObservatory,
-  shutdownObservatory,
-  instrumentOpenAI,
-  PricingEngine,
+export default {
+  initObservatory: init,
+  getObservatory: get,
+  shutdownObservatory: shutdown,
+  instrumentOpenAI: instrument,
+  PricingEngine: Pricing,
   VERSION,
 };
-
-export default observatory;

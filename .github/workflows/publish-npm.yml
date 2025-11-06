@@ -1,0 +1,125 @@
+name: Publish Node.js SDK to npm
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (e.g., 0.1.0)'
+        required: true
+        type: string
+      tag:
+        description: 'npm tag (latest, beta, next)'
+        required: true
+        type: choice
+        options:
+          - latest
+          - beta
+          - next
+        default: latest
+      dry_run:
+        description: 'Perform a dry run (no actual publish)'
+        required: false
+        type: boolean
+        default: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: npm-publishing
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        working-directory: sdk/nodejs
+        run: npm ci
+
+      - name: Run linting
+        working-directory: sdk/nodejs
+        run: npm run lint
+
+      - name: Run tests
+        working-directory: sdk/nodejs
+        run: npm test
+
+      - name: Build package
+        working-directory: sdk/nodejs
+        run: npm run build
+
+      - name: Update package version
+        working-directory: sdk/nodejs
+        run: npm version ${{ inputs.version }} --no-git-tag-version
+
+      - name: Verify package contents
+        working-directory: sdk/nodejs
+        run: npm pack --dry-run
+
+      - name: Publish to npm (dry run)
+        if: inputs.dry_run == true
+        working-directory: sdk/nodejs
+        run: npm publish --tag ${{ inputs.tag }} --dry-run
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish to npm
+        if: inputs.dry_run == false
+        working-directory: sdk/nodejs
+        run: npm publish --tag ${{ inputs.tag }} --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Create Git tag
+        if: inputs.dry_run == false
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "sdk-nodejs-v${{ inputs.version }}" -m "Release Node.js SDK v${{ inputs.version }}"
+          git push origin "sdk-nodejs-v${{ inputs.version }}"
+
+      - name: Create GitHub Release
+        if: inputs.dry_run == false
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: sdk-nodejs-v${{ inputs.version }}
+          release_name: Node.js SDK v${{ inputs.version }}
+          body: |
+            ## Node.js SDK v${{ inputs.version }}
+
+            Published to npm as `@llm-observatory/sdk@${{ inputs.version }}`
+
+            ### Installation
+            ```bash
+            npm install @llm-observatory/sdk@${{ inputs.version }}
+            ```
+
+            ### Documentation
+            - [README](https://github.com/${{ github.repository }}/tree/main/sdk/nodejs)
+            - [npm package](https://www.npmjs.com/package/@llm-observatory/sdk)
+          draft: false
+          prerelease: ${{ inputs.tag != 'latest' }}
+
+      - name: Summary
+        run: |
+          echo "### Publication Summary :rocket:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Package**: @llm-observatory/sdk" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version**: ${{ inputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tag**: ${{ inputs.tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Dry Run**: ${{ inputs.dry_run }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ inputs.dry_run }}" = "false" ]; then
+            echo "✅ Successfully published to npm!" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Install with: \`npm install @llm-observatory/sdk@${{ inputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "ℹ️ Dry run completed. No actual publish performed." >> $GITHUB_STEP_SUMMARY
+          fi

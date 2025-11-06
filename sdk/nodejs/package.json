@@ -6,7 +6,7 @@
   "types": "dist/index.d.ts",
   "repository": {
     "type": "git",
-    "url": "https://github.com/llm-observatory/llm-observatory.git",
+    "url": "https://github.com/globalbusinessadvisors/llm-observatory.git",
     "directory": "sdk/nodejs"
   },
   "keywords": [
