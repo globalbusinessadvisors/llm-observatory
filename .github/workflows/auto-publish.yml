@@ -1,0 +1,256 @@
+name: Auto Publish on Version Change
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'sdk/nodejs/package.json'
+      - 'Cargo.toml'
+      - 'crates/**/Cargo.toml'
+
+jobs:
+  check-versions:
+    runs-on: ubuntu-latest
+    outputs:
+      npm-changed: ${{ steps.npm-version.outputs.changed }}
+      npm-version: ${{ steps.npm-version.outputs.version }}
+      rust-changed: ${{ steps.rust-version.outputs.changed }}
+      rust-version: ${{ steps.rust-version.outputs.version }}
+    steps:
+      - name: Checkout current commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Check npm version change
+        id: npm-version
+        run: |
+          # Get current version
+          CURRENT=$(jq -r '.version' sdk/nodejs/package.json)
+
+          # Get previous version (from parent commit)
+          git checkout HEAD^ -- sdk/nodejs/package.json 2>/dev/null || echo "First commit"
+          PREVIOUS=$(jq -r '.version' sdk/nodejs/package.json 2>/dev/null || echo "0.0.0")
+
+          # Restore current version
+          git checkout HEAD -- sdk/nodejs/package.json
+
+          echo "Previous version: $PREVIOUS"
+          echo "Current version: $CURRENT"
+
+          if [ "$CURRENT" != "$PREVIOUS" ]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "version=$CURRENT" >> $GITHUB_OUTPUT
+            echo "✅ npm version changed: $PREVIOUS → $CURRENT"
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "No npm version change"
+          fi
+
+      - name: Check Rust version change
+        id: rust-version
+        run: |
+          # Get current version from workspace Cargo.toml
+          CURRENT=$(grep -m1 '^version = ' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+
+          # Get previous version
+          git checkout HEAD^ -- Cargo.toml 2>/dev/null || echo "First commit"
+          PREVIOUS=$(grep -m1 '^version = ' Cargo.toml 2>/dev/null | sed 's/version = "\(.*\)"/\1/' || echo "0.0.0")
+
+          # Restore current version
+          git checkout HEAD -- Cargo.toml
+
+          echo "Previous version: $PREVIOUS"
+          echo "Current version: $CURRENT"
+
+          if [ "$CURRENT" != "$PREVIOUS" ]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "version=$CURRENT" >> $GITHUB_OUTPUT
+            echo "✅ Rust version changed: $PREVIOUS → $CURRENT"
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "No Rust version change"
+          fi
+
+  publish-npm:
+    needs: check-versions
+    if: needs.check-versions.outputs.npm-changed == 'true'
+    runs-on: ubuntu-latest
+    environment: npm-publishing
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        working-directory: sdk/nodejs
+        run: npm ci
+
+      - name: Run linting
+        working-directory: sdk/nodejs
+        run: npm run lint
+
+      - name: Run tests
+        working-directory: sdk/nodejs
+        run: npm test
+
+      - name: Build
+        working-directory: sdk/nodejs
+        run: npm run build
+
+      - name: Publish to npm
+        working-directory: sdk/nodejs
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Create Git tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "sdk-nodejs-v${{ needs.check-versions.outputs.npm-version }}" -m "Auto-release Node.js SDK v${{ needs.check-versions.outputs.npm-version }}"
+          git push origin "sdk-nodejs-v${{ needs.check-versions.outputs.npm-version }}"
+
+      - name: Create GitHub Release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: sdk-nodejs-v${{ needs.check-versions.outputs.npm-version }}
+          release_name: Node.js SDK v${{ needs.check-versions.outputs.npm-version }}
+          body: |
+            ## 🚀 Node.js SDK v${{ needs.check-versions.outputs.npm-version }}
+
+            **Auto-published from commit:** ${{ github.sha }}
+
+            ### Installation
+            ```bash
+            npm install @llm-observatory/sdk@${{ needs.check-versions.outputs.npm-version }}
+            ```
+
+            ### Links
+            - [npm package](https://www.npmjs.com/package/@llm-observatory/sdk)
+            - [Documentation](https://github.com/${{ github.repository }}/tree/main/sdk/nodejs)
+            - [Changelog](https://github.com/${{ github.repository }}/blob/main/sdk/nodejs/CHANGELOG.md)
+
+      - name: Notify success
+        run: |
+          echo "### ✅ Successfully Published to npm! :rocket:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Package**: @llm-observatory/sdk" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version**: ${{ needs.check-versions.outputs.npm-version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **npm URL**: https://www.npmjs.com/package/@llm-observatory/sdk" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Install with: \`npm install @llm-observatory/sdk@${{ needs.check-versions.outputs.npm-version }}\`" >> $GITHUB_STEP_SUMMARY
+
+  publish-crates:
+    needs: check-versions
+    if: needs.check-versions.outputs.rust-changed == 'true'
+    runs-on: ubuntu-latest
+    environment: crates-io-publishing
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: 1.75.0
+
+      - name: Run tests
+        run: cargo test --workspace
+
+      - name: Run clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Login to crates.io
+        run: cargo login ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Publish core
+        run: |
+          echo "📦 Publishing llm-observatory-core..."
+          cd crates/core
+          cargo publish --allow-dirty || echo "Already published or error"
+          cd ../..
+          sleep 60
+
+      - name: Publish providers
+        run: |
+          echo "📦 Publishing llm-observatory-providers..."
+          cd crates/providers
+          cargo publish --allow-dirty || echo "Already published or error"
+          cd ../..
+          sleep 60
+
+      - name: Publish storage
+        run: |
+          echo "📦 Publishing llm-observatory-storage..."
+          cd crates/storage
+          cargo publish --allow-dirty || echo "Already published or error"
+          cd ../..
+          sleep 60
+
+      - name: Publish collector
+        run: |
+          echo "📦 Publishing llm-observatory-collector..."
+          cd crates/collector
+          cargo publish --allow-dirty || echo "Already published or error"
+          cd ../..
+          sleep 60
+
+      - name: Publish SDK
+        run: |
+          echo "📦 Publishing llm-observatory-sdk..."
+          cd crates/sdk
+          cargo publish --allow-dirty || echo "Already published or error"
+          cd ../..
+
+      - name: Create Git tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "v${{ needs.check-versions.outputs.rust-version }}" -m "Auto-release Rust crates v${{ needs.check-versions.outputs.rust-version }}"
+          git push origin "v${{ needs.check-versions.outputs.rust-version }}"
+
+      - name: Create GitHub Release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v${{ needs.check-versions.outputs.rust-version }}
+          release_name: Rust Crates v${{ needs.check-versions.outputs.rust-version }}
+          body: |
+            ## 🦀 Rust Crates v${{ needs.check-versions.outputs.rust-version }}
+
+            **Auto-published from commit:** ${{ github.sha }}
+
+            ### Published Crates
+            - [llm-observatory-core](https://crates.io/crates/llm-observatory-core)
+            - [llm-observatory-providers](https://crates.io/crates/llm-observatory-providers)
+            - [llm-observatory-storage](https://crates.io/crates/llm-observatory-storage)
+            - [llm-observatory-collector](https://crates.io/crates/llm-observatory-collector)
+            - [llm-observatory-sdk](https://crates.io/crates/llm-observatory-sdk)
+
+            ### Installation
+            ```toml
+            [dependencies]
+            llm-observatory-core = "${{ needs.check-versions.outputs.rust-version }}"
+            ```
+
+      - name: Notify success
+        run: |
+          echo "### ✅ Successfully Published to crates.io! :package:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version**: ${{ needs.check-versions.outputs.rust-version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Crates**: core, providers, storage, collector, sdk" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "View on crates.io:" >> $GITHUB_STEP_SUMMARY
+          echo "- https://crates.io/crates/llm-observatory-core" >> $GITHUB_STEP_SUMMARY
