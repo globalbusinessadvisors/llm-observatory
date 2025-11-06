@@ -17,8 +17,8 @@ path = "src/main.rs"
 
 [dependencies]
 # Internal
-llm-observatory-core = { path = "../core" }
-llm-observatory-providers = { path = "../providers" }
+llm-observatory-core = { version = "0.1.1", path = "../core" }
+llm-observatory-providers = { version = "0.1.1", path = "../providers" }
 
 # Async
 tokio = { workspace = true }
@@ -51,6 +51,8 @@ uuid = { workspace = true }
 chrono = { workspace = true }
 regex = { workspace = true }
 dashmap = { workspace = true }
+once_cell = { workspace = true }
+rand = "0.8"
 
 # Observability
 tracing = { workspace = true }

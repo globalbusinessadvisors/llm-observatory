@@ -13,7 +13,7 @@ description = "LLM provider implementations and pricing models for LLM Observato
 
 [dependencies]
 # Internal
-llm-observatory-core = { path = "../core" }
+llm-observatory-core = { version = "0.1.1", path = "../core" }
 
 # Async
 tokio = { workspace = true }

@@ -13,8 +13,8 @@ description = "Rust SDK for LLM Observatory with trait-based instrumentation"
 
 [dependencies]
 # Internal
-llm-observatory-core = { path = "../core" }
-llm-observatory-providers = { path = "../providers" }
+llm-observatory-core = { version = "0.1.1", path = "../core" }
+llm-observatory-providers = { version = "0.1.1", path = "../providers" }
 
 # Async
 tokio = { workspace = true, features = ["full"] }

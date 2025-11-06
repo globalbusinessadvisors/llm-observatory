@@ -14,7 +14,7 @@ description = "Storage layer for LLM Observatory - handles persistence of traces
 
 [dependencies]
 # Core dependencies
-llm-observatory-core = { path = "../core" }
+llm-observatory-core = { version = "0.1.1", path = "../core" }
 
 # Async runtime
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }

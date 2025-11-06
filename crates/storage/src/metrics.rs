@@ -132,18 +132,16 @@ impl StorageMetrics {
 
         histogram!(
             "storage_write_duration_seconds",
-            duration_secs,
             "writer_type" => writer_type.to_string(),
-            "operation" => operation.to_string(),
-        );
+            "operation" => operation.to_string()
+        ).record(duration_secs);
 
         counter!(
             "storage_writes_total",
-            1,
             "writer_type" => writer_type.to_string(),
             "operation" => operation.to_string(),
-            "status" => status.to_string(),
-        );
+            "status" => status.to_string()
+        ).increment(1);
     }
 
     /// Record a query operation.
@@ -156,20 +154,18 @@ impl StorageMetrics {
     pub fn record_query(&self, repository: &str, method: &str, duration_secs: f64) {
         histogram!(
             "storage_query_duration_seconds",
-            duration_secs,
             "repository" => repository.to_string(),
-            "method" => method.to_string(),
-        );
+            "method" => method.to_string()
+        ).record(duration_secs);
     }
 
     /// Record query results count.
     pub fn record_query_result_count(&self, repository: &str, method: &str, count: usize) {
         histogram!(
             "storage_query_result_count",
-            count as f64,
             "repository" => repository.to_string(),
-            "method" => method.to_string(),
-        );
+            "method" => method.to_string()
+        ).record(count as f64);
     }
 
     /// Update connection pool metrics.
@@ -182,21 +178,18 @@ impl StorageMetrics {
     pub fn update_pool_connections(&self, active: u32, idle: u32, max: u32) {
         gauge!(
             "storage_pool_connections",
-            active as f64,
-            "state" => "active",
-        );
+            "state" => "active"
+        ).set(active as f64);
 
         gauge!(
             "storage_pool_connections",
-            idle as f64,
-            "state" => "idle",
-        );
+            "state" => "idle"
+        ).set(idle as f64);
 
         gauge!(
             "storage_pool_connections",
-            max as f64,
-            "state" => "max",
-        );
+            "state" => "max"
+        ).set(max as f64);
     }
 
     /// Record an error.
@@ -209,16 +202,14 @@ impl StorageMetrics {
         if let Some(op) = operation {
             counter!(
                 "storage_errors_total",
-                1,
                 "error_type" => error_type.to_string(),
-                "operation" => op.to_string(),
-            );
+                "operation" => op.to_string()
+            ).increment(1);
         } else {
             counter!(
                 "storage_errors_total",
-                1,
-                "error_type" => error_type.to_string(),
-            );
+                "error_type" => error_type.to_string()
+            ).increment(1);
         }
     }
 
@@ -232,10 +223,9 @@ impl StorageMetrics {
     pub fn record_batch_size(&self, writer_type: &str, operation: &str, size: usize) {
         histogram!(
             "storage_batch_size",
-            size as f64,
             "writer_type" => writer_type.to_string(),
-            "operation" => operation.to_string(),
-        );
+            "operation" => operation.to_string()
+        ).record(size as f64);
     }
 
     /// Update buffer size gauge.
@@ -248,10 +238,9 @@ impl StorageMetrics {
     pub fn update_buffer_size(&self, writer_type: &str, buffer_type: &str, size: usize) {
         gauge!(
             "storage_buffer_size",
-            size as f64,
             "writer_type" => writer_type.to_string(),
-            "buffer_type" => buffer_type.to_string(),
-        );
+            "buffer_type" => buffer_type.to_string()
+        ).set(size as f64);
     }
 
     /// Record a buffer flush operation.
@@ -264,10 +253,9 @@ impl StorageMetrics {
         let status = if success { "success" } else { "error" };
         counter!(
             "storage_flushes_total",
-            1,
             "writer_type" => writer_type.to_string(),
-            "status" => status.to_string(),
-        );
+            "status" => status.to_string()
+        ).increment(1);
     }
 
     /// Record a retry attempt.
@@ -278,9 +266,8 @@ impl StorageMetrics {
     pub fn record_retry(&self, operation: &str) {
         counter!(
             "storage_retries_total",
-            1,
-            "operation" => operation.to_string(),
-        );
+            "operation" => operation.to_string()
+        ).increment(1);
     }
 
     /// Record items written to storage.
@@ -293,18 +280,16 @@ impl StorageMetrics {
     pub fn record_items_written(&self, writer_type: &str, item_type: &str, count: u64) {
         counter!(
             "storage_items_written_total",
-            count,
             "writer_type" => writer_type.to_string(),
-            "item_type" => item_type.to_string(),
-        );
+            "item_type" => item_type.to_string()
+        ).increment(count);
     }
 
     /// Record connection acquisition duration.
     pub fn record_connection_acquire(&self, duration_secs: f64) {
         histogram!(
-            "storage_connection_acquire_duration_seconds",
-            duration_secs,
-        );
+            "storage_connection_acquire_duration_seconds"
+        ).record(duration_secs);
     }
 }
 
