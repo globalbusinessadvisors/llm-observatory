@@ -1,0 +1,141 @@
+name: Publish on Tag
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'           # Rust crates: v0.1.0
+      - 'sdk-nodejs-v*.*.*' # Node.js SDK: sdk-nodejs-v0.1.0
+
+jobs:
+  publish-npm:
+    if: startsWith(github.ref, 'refs/tags/sdk-nodejs-v')
+    runs-on: ubuntu-latest
+    environment: npm-publishing
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/sdk-nodejs-v}" >> $GITHUB_OUTPUT
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        working-directory: sdk/nodejs
+        run: npm ci
+
+      - name: Run tests
+        working-directory: sdk/nodejs
+        run: npm test
+
+      - name: Build
+        working-directory: sdk/nodejs
+        run: npm run build
+
+      - name: Update version
+        working-directory: sdk/nodejs
+        run: npm version ${{ steps.version.outputs.version }} --no-git-tag-version --allow-same-version
+
+      - name: Publish to npm
+        working-directory: sdk/nodejs
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Create GitHub Release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Node.js SDK v${{ steps.version.outputs.version }}
+          body: |
+            ## Node.js SDK v${{ steps.version.outputs.version }}
+
+            Install with:
+            ```bash
+            npm install @llm-observatory/sdk@${{ steps.version.outputs.version }}
+            ```
+
+            [View on npm](https://www.npmjs.com/package/@llm-observatory/sdk)
+
+  publish-crates:
+    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, 'sdk-nodejs')
+    runs-on: ubuntu-latest
+    environment: crates-io-publishing
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: 1.75.0
+
+      - name: Run tests
+        run: cargo test --workspace
+
+      - name: Login to crates.io
+        run: cargo login ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Publish core
+        run: |
+          cd crates/core
+          cargo publish --allow-dirty
+          cd ../..
+          sleep 60
+
+      - name: Publish providers
+        run: |
+          cd crates/providers
+          cargo publish --allow-dirty
+          cd ../..
+          sleep 60
+
+      - name: Publish storage
+        run: |
+          cd crates/storage
+          cargo publish --allow-dirty
+          cd ../..
+          sleep 60
+
+      - name: Publish collector
+        run: |
+          cd crates/collector
+          cargo publish --allow-dirty
+          cd ../..
+          sleep 60
+
+      - name: Publish SDK
+        run: |
+          cd crates/sdk
+          cargo publish --allow-dirty
+          cd ../..
+
+      - name: Create GitHub Release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Rust Crates v${{ steps.version.outputs.version }}
+          body: |
+            ## Rust Crates v${{ steps.version.outputs.version }}
+
+            Published to crates.io:
+            - [llm-observatory-core](https://crates.io/crates/llm-observatory-core)
+            - [llm-observatory-providers](https://crates.io/crates/llm-observatory-providers)
+            - [llm-observatory-storage](https://crates.io/crates/llm-observatory-storage)
+            - [llm-observatory-collector](https://crates.io/crates/llm-observatory-collector)
+            - [llm-observatory-sdk](https://crates.io/crates/llm-observatory-sdk)
