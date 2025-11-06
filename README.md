@@ -51,13 +51,36 @@ LLM Observatory is a **production-ready**, high-performance, open-source observa
 
 ---
 
+## 📦 Published Packages
+
+### Node.js SDK
+```bash
+npm install @llm-dev-ops/sdk
+```
+[![npm version](https://img.shields.io/npm/v/@llm-dev-ops/sdk)](https://www.npmjs.com/package/@llm-dev-ops/sdk)
+[![npm downloads](https://img.shields.io/npm/dm/@llm-dev-ops/sdk)](https://www.npmjs.com/package/@llm-dev-ops/sdk)
+
+### Rust Crates
+```toml
+[dependencies]
+llm-observatory-core = "0.1.1"
+llm-observatory-providers = "0.1.1"
+llm-observatory-storage = "0.1.1"
+llm-observatory-collector = "0.1.1"
+llm-observatory-sdk = "0.1.1"
+```
+[![Crates.io](https://img.shields.io/crates/v/llm-observatory-core)](https://crates.io/crates/llm-observatory-core)
+[![docs.rs](https://img.shields.io/docsrs/llm-observatory-core)](https://docs.rs/llm-observatory-core)
+
+---
+
 ## Quick Start (5 Minutes)
 
 Get the full observability stack running in just 5 minutes:
 
 ```bash
 # 1. Clone and configure
-git clone https://github.com/llm-observatory/llm-observatory.git
+git clone https://github.com/globalbusinessadvisors/llm-observatory.git
 cd llm-observatory
 cp .env.example .env
 
@@ -81,10 +104,10 @@ open http://localhost:8080  # Analytics API
 
 ```bash
 # Install SDK
-npm install @llm-observatory/sdk
+npm install @llm-dev-ops/sdk
 
 # Initialize in your app
-import { initObservatory, instrumentOpenAI } from '@llm-observatory/sdk';
+import { initObservatory, instrumentOpenAI } from '@llm-dev-ops/sdk';
 import OpenAI from 'openai';
 
 // Initialize observatory
