@@ -105,6 +105,10 @@ llm-cost-ops = { git = "https://github.com/LLM-Dev-Ops/cost-ops.git", branch = "
 # Sentinel - provides anomaly detection and alerting
 llm-sentinel-core = { git = "https://github.com/LLM-Dev-Ops/sentinel.git", branch = "main" }
 
+# LLM-Dev-Ops Upstream Dependencies (Phase 2B - Infra integration)
+# Infra - provides foundational utilities for metrics, logging, tracing, config, errors, caching, retry, rate limiting
+llm-infra-core = { git = "https://github.com/LLM-Dev-Ops/infra.git", branch = "main", features = ["metrics", "logging", "tracing", "config", "errors", "cache", "retry", "rate-limit"] }
+
 [profile.dev]
 opt-level = 0
 debug = true

@@ -22,9 +22,12 @@ uuid.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 
-# LLM-Dev-Ops Upstream Dependencies (Phase 2B - Consumes-From)
+# LLM-Dev-Ops Upstream Dependencies (Phase 2A - Consumes-From)
 schema-registry-core.workspace = true
 llm-config-core.workspace = true
 llm-latency-lens-core.workspace = true
 llm-cost-ops.workspace = true
 llm-sentinel-core.workspace = true
+
+# LLM-Dev-Ops Upstream Dependencies (Phase 2B - Infra Consumes-From)
+llm-infra-core.workspace = true

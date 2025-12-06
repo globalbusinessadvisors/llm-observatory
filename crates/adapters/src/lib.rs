@@ -7,11 +7,17 @@
 //!
 //! 2. **Upstream Integrations**: Consumption adapters for the LLM-Dev-Ops
 //!    ecosystem, providing integration with:
+//!
+//!    ## Phase 2A - Compile-time Dependencies
 //!    - Schema Registry (schema validation)
 //!    - Config Manager (configuration management)
 //!    - Latency Lens (latency profiling)
 //!    - CostOps (cost analytics)
 //!    - Sentinel (anomaly detection)
+//!
+//!    ## Phase 2B - Infra Integration
+//!    - Infra (foundational utilities for metrics, logging, tracing, config,
+//!      errors, caching, retry, rate limiting)
 //!
 //! # Quick Start - Benchmarks
 //!
@@ -113,3 +119,5 @@ pub fn all_targets() -> Vec<Box<dyn BenchTarget>> {
 pub use upstream::{ConfigAdapter, CostAdapter, LatencyAdapter, SchemaAdapter, SentinelAdapter};
 // Phase 2B - Runtime-only adapters
 pub use upstream::{EdgeAgentAdapter, InferenceGatewayAdapter, OrchestratorAdapter};
+// Phase 2B - Infra integration adapters
+pub use upstream::InfraAdapter;

@@ -60,6 +60,9 @@ pub mod edge_agent;
 pub mod inference_gateway;
 pub mod orchestrator;
 
+// Phase 2B - Infra integration (foundational utilities)
+pub mod infra;
+
 /// Prelude module for convenient imports.
 pub mod prelude {
     // Phase 2A adapters
@@ -73,6 +76,13 @@ pub mod prelude {
     pub use super::edge_agent::{EdgeAgentAdapter, EdgeAgentAdapterError};
     pub use super::inference_gateway::{InferenceGatewayAdapter, InferenceGatewayAdapterError};
     pub use super::orchestrator::{OrchestratorAdapter, OrchestratorAdapterError};
+
+    // Phase 2B Infra adapters
+    pub use super::infra::{
+        CacheAdapter, CacheStatsInfo, InfraAdapter, InfraAdapterError, LoggingAdapter,
+        MetricsAdapter, ObservatoryCacheConfig, ObservatoryLogLevel, ObservatoryMetric,
+        ObservatoryRateLimitConfig, ObservatoryRetryConfig, RateLimitAdapter, RetryAdapter,
+    };
 }
 
 // Re-export Phase 2A adapters at module level
@@ -86,3 +96,6 @@ pub use sentinel::SentinelAdapter;
 pub use edge_agent::EdgeAgentAdapter;
 pub use inference_gateway::InferenceGatewayAdapter;
 pub use orchestrator::OrchestratorAdapter;
+
+// Re-export Phase 2B Infra adapters at module level
+pub use infra::InfraAdapter;
