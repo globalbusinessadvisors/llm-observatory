@@ -30,4 +30,8 @@ llm-cost-ops.workspace = true
 llm-sentinel-core.workspace = true
 
 # LLM-Dev-Ops Upstream Dependencies (Phase 2B - Infra Consumes-From)
-llm-infra-core.workspace = true
+infra-cache.workspace = true
+infra-errors.workspace = true
+infra-rate-limit.workspace = true
+
+rand = "0.8"
