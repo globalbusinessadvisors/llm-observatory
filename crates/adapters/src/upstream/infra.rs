@@ -3,8 +3,9 @@
 
 //! Infra adapter for Observatory.
 //!
-//! This module provides foundational infrastructure utilities by consuming
-//! the llm-infra-core crate from the LLM-Dev-Ops ecosystem.
+//! This module provides foundational infrastructure utilities, and converts
+//! its configuration types into those of the `infra-*` crates from the
+//! LLM-Dev-Ops ecosystem.
 //!
 //! # Features
 //!
@@ -43,16 +44,9 @@
 //! }
 //! ```
 
-use llm_infra_core::{
-    cache::{Cache, CacheConfig, CacheEntry, CacheStats},
-    config::{ConfigLoader, ConfigSource, ConfigValue, Environment},
-    errors::{ErrorContext, ErrorKind, InfraError, InfraResult},
-    logging::{LogContext, LogLevel, Logger, StructuredLogger},
-    metrics::{Counter, Gauge, Histogram, MetricsRegistry, Timer},
-    rate_limit::{RateLimiter, RateLimitConfig, RateLimitResult},
-    retry::{RetryConfig, RetryPolicy, RetryResult},
-    tracing::{SpanContext, TraceId, TracingConfig},
-};
+use infra_cache::CacheConfig;
+use infra_errors::{InfraError, RetryConfig};
+use infra_rate_limit::RateLimitConfig;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -174,18 +168,6 @@ pub enum ObservatoryLogLevel {
     Critical,
 }
 
-impl From<ObservatoryLogLevel> for LogLevel {
-    fn from(level: ObservatoryLogLevel) -> Self {
-        match level {
-            ObservatoryLogLevel::Debug => LogLevel::Debug,
-            ObservatoryLogLevel::Info => LogLevel::Info,
-            ObservatoryLogLevel::Warn => LogLevel::Warn,
-            ObservatoryLogLevel::Error => LogLevel::Error,
-            ObservatoryLogLevel::Critical => LogLevel::Critical,
-        }
-    }
-}
-
 /// Cache configuration for Observatory.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ObservatoryCacheConfig {
@@ -209,10 +191,9 @@ impl Default for ObservatoryCacheConfig {
 
 impl From<ObservatoryCacheConfig> for CacheConfig {
     fn from(config: ObservatoryCacheConfig) -> Self {
-        CacheConfig::new()
-            .with_max_entries(config.max_entries)
-            .with_default_ttl(Duration::from_secs(config.default_ttl_secs))
-            .with_stats(config.enable_stats)
+        CacheConfig::with_max_size(config.max_entries)
+            .with_ttl(Duration::from_secs(config.default_ttl_secs))
+            .with_metrics(config.enable_stats)
     }
 }
 
@@ -240,17 +221,20 @@ impl Default for ObservatoryRateLimitConfig {
     }
 }
 
+// `RateLimitConfig::new` is fallible but `From` is not, so the fields are set
+// directly; a zero-length window would yield an infinite rate rather than an error.
 impl From<ObservatoryRateLimitConfig> for RateLimitConfig {
     fn from(config: ObservatoryRateLimitConfig) -> Self {
-        let mut rl_config = RateLimitConfig::new()
-            .with_max_requests(config.max_requests)
-            .with_window(Duration::from_secs(config.window_secs));
-
-        if config.enable_burst {
-            rl_config = rl_config.with_burst(config.burst_size);
+        let window = Duration::from_secs(config.window_secs);
+        RateLimitConfig {
+            requests_per_second: config.max_requests as f64 / window.as_secs_f64(),
+            burst_size: if config.enable_burst {
+                config.burst_size as u64
+            } else {
+                config.max_requests as u64
+            },
+            window_size: window,
         }
-
-        rl_config
     }
 }
 
@@ -281,19 +265,15 @@ impl Default for ObservatoryRetryConfig {
     }
 }
 
+// `backoff_multiplier` has no counterpart in `infra_errors::RetryConfig`, which
+// selects a `RetryStrategy` variant instead of taking a numeric multiplier.
 impl From<ObservatoryRetryConfig> for RetryConfig {
     fn from(config: ObservatoryRetryConfig) -> Self {
-        let mut retry_config = RetryConfig::new()
-            .with_max_attempts(config.max_attempts)
-            .with_initial_delay(Duration::from_millis(config.initial_delay_ms))
+        RetryConfig::new()
+            .with_max_attempts(config.max_attempts as usize)
+            .with_base_delay(Duration::from_millis(config.initial_delay_ms))
             .with_max_delay(Duration::from_millis(config.max_delay_ms))
-            .with_backoff_multiplier(config.backoff_multiplier);
-
-        if config.add_jitter {
-            retry_config = retry_config.with_jitter();
-        }
-
-        retry_config
+            .with_jitter(config.add_jitter)
     }
 }
 
